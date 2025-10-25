@@ -378,7 +378,7 @@
         }
         state.remaining = next;
         updateDisplay();
-        emitState();  // Sync every second
+        // Don't emit on every tick - clients run independently
         if (next === 0) {
           setTimeout(() => {
             advancePhase();

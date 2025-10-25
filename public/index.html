@@ -302,46 +302,56 @@
 
     function startPause(){
       ensureAudio();
+
+      // Calculate what the new state should be (but don't apply it locally)
+      let newState = { ...state };
       if (state.phase === 'stopped') {
-        state.phase = 'climb';
-        state.remaining = totalClimb();
-        climbStartTone();
+        newState.phase = 'climb';
+        newState.remaining = totalClimb();
       }
-      state.running = !state.running;
-      // Don't run local timer - server handles it
-      updateDisplay();
-      refreshUiVisibility(true);
-      emitState();  // Send command to server
+      newState.running = !state.running;
+
+      // Send command to server - wait for server to confirm and broadcast
+      socket.emit('timer-update', newState);
+
+      // Optimistic UI update for button label only
+      document.getElementById('startPause').textContent = newState.running ? 'Pause' : 'Resume';
     }
 
     function resetAll(){
-      state.running = false;
-      state.phase = 'stopped';
-      state.remaining = totalClimb();
-      updateDisplay();
-      emitState();  // Send command to server
+      // Send command to server - wait for server to confirm and broadcast
+      socket.emit('timer-update', {
+        ...state,
+        running: false,
+        phase: 'stopped',
+        remaining: totalClimb()
+      });
     }
 
     // Phase advance is now handled by the server
 
     function nextPhase(){
+      // Calculate next phase (but don't apply it locally)
+      let newState = { ...state };
+
       if (state.phase === 'climb') {
         if (totalTrans() > 0) {
-          state.phase = 'transition';
-          state.remaining = totalTrans();
+          newState.phase = 'transition';
+          newState.remaining = totalTrans();
         } else {
-          state.phase = 'stopped';
-          state.remaining = totalClimb();
+          newState.phase = 'stopped';
+          newState.remaining = totalClimb();
         }
       } else if (state.phase === 'transition') {
-        state.phase = 'climb';
-        state.remaining = totalClimb();
+        newState.phase = 'climb';
+        newState.remaining = totalClimb();
       } else {
-        state.phase = 'climb';
-        state.remaining = totalClimb();
+        newState.phase = 'climb';
+        newState.remaining = totalClimb();
       }
-      updateDisplay();
-      emitState();  // Send command to server
+
+      // Send command to server - wait for server to confirm and broadcast
+      socket.emit('timer-update', newState);
     }
 
     // Audio feedback based on timer state (triggered by server updates)

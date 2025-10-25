@@ -308,53 +308,23 @@
         climbStartTone();
       }
       state.running = !state.running;
-      if (state.running) tickStart(); else tickStop();
+      // Don't run local timer - server handles it
       updateDisplay();
       refreshUiVisibility(true);
-      emitState();  // Sync to all clients
+      emitState();  // Send command to server
     }
 
     function resetAll(){
-      tickStop();
       state.running = false;
       state.phase = 'stopped';
       state.remaining = totalClimb();
       updateDisplay();
-      emitState();  // Sync to all clients
+      emitState();  // Send command to server
     }
 
-    function advancePhase() {
-      if (!state.running) return;
-      // If we're receiving a sync, don't advance again
-      if (state.syncInProgress) return;
-
-      // If another client advanced in the last 2 seconds, don't advance again
-      const now = Date.now();
-      if (now - state.lastPhaseChangeTime < 2000) {
-        console.log('Skipping phase advance - another client already advanced');
-        return;
-      }
-
-      if (state.phase === 'climb') {
-        if (totalTrans() > 0) {
-          state.phase = 'transition';
-          state.remaining = totalTrans();
-        } else {
-          state.phase = 'climb';
-          state.remaining = totalClimb();
-        }
-      } else if (state.phase === 'transition') {
-        state.phase = 'climb';
-        state.remaining = totalClimb();
-        climbStartTone();
-      }
-      state.lastPhaseChangeTime = now;
-      updateDisplay();
-      emitState();  // Sync to all clients
-    }
+    // Phase advance is now handled by the server
 
     function nextPhase(){
-      tickStop();
       if (state.phase === 'climb') {
         if (totalTrans() > 0) {
           state.phase = 'transition';
@@ -370,51 +340,29 @@
         state.phase = 'climb';
         state.remaining = totalClimb();
       }
-      state.lastPhaseChangeTime = Date.now();
       updateDisplay();
-      emitState();  // Sync to all clients
+      emitState();  // Send command to server
     }
 
-    function tickStart(){
-      if (state.intervalId) return;
-      state.intervalId = setInterval(() => {
-        const prev = state.remaining;
-        const next = Math.max(prev - 1, 0);
-        if (state.phase === 'climb') {
-          if (next === 60) {
-            beep(800, 0.65, 'sine');
-          } else if (next <= 5 && next > 0) {
-            beep(1200, 0.45, 'square');
-          } else if (next === 0) {
-            buzzer(1.4);
-          }
+    // Audio feedback based on timer state (triggered by server updates)
+    function playAudioForTime(remaining, phase) {
+      if (phase === 'climb') {
+        if (remaining === 60) {
+          beep(800, 0.65, 'sine');
+        } else if (remaining <= 5 && remaining > 0) {
+          beep(1200, 0.45, 'square');
+        } else if (remaining === 0) {
+          buzzer(1.4);
         }
-        state.remaining = next;
-        updateDisplay();
-        // Don't emit on every tick - clients run independently
-        if (next === 0) {
-          setTimeout(() => {
-            advancePhase();
-            if (state.running && state.phase !== 'stopped') {
-              // Keep ticking
-            } else {
-              tickStop();
-            }
-          }, 0);
-        }
-      }, 1000);
-    }
-
-    function tickStop(){
-      if (state.intervalId) { clearInterval(state.intervalId); state.intervalId = null; }
+      }
     }
 
     // --- Listen for state updates from server ---
     socket.on('timer-sync', (serverState) => {
       state.syncInProgress = true;  // Prevent re-emitting during sync
 
-      const wasRunning = state.running;
       const oldPhase = state.phase;
+      const oldRemaining = state.remaining;
 
       // Update local state from server
       state.climbMin = serverState.climbMin;
@@ -425,10 +373,15 @@
       state.running = serverState.running;
       state.remaining = serverState.remaining;
 
-      // If phase changed from another client, record the time
-      if (oldPhase !== serverState.phase) {
-        state.lastPhaseChangeTime = Date.now();
-        console.log('Phase change received from another client:', oldPhase, '->', serverState.phase);
+      // Handle phase changes (play start tone when entering climb phase)
+      if (oldPhase !== serverState.phase && serverState.phase === 'climb') {
+        climbStartTone();
+        console.log('Phase changed to climb - playing start tone');
+      }
+
+      // Play audio feedback based on remaining time (only on countdown, not on time increases)
+      if (serverState.remaining < oldRemaining) {
+        playAudioForTime(serverState.remaining, serverState.phase);
       }
 
       // Update input fields
@@ -436,13 +389,6 @@
       document.getElementById('climbSec').value = state.climbSec;
       document.getElementById('transMin').value = state.transMin;
       document.getElementById('transSec').value = state.transSec;
-
-      // Handle timer running state
-      if (serverState.running && !wasRunning) {
-        tickStart();
-      } else if (!serverState.running && wasRunning) {
-        tickStop();
-      }
 
       updateDisplay();
       refreshUiVisibility(true);

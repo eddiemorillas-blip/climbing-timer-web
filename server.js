@@ -51,6 +51,61 @@ let timerState = {
 // Track connected clients
 let connectedClients = 0;
 
+// Server-side timer interval
+let timerInterval = null;
+
+// Helper functions
+const totalClimb = () => timerState.climbMin * 60 + timerState.climbSec;
+const totalTrans = () => timerState.transMin * 60 + timerState.transSec;
+
+// Server-side countdown function
+function startServerTimer() {
+  if (timerInterval) return; // Already running
+
+  timerInterval = setInterval(() => {
+    if (!timerState.running) {
+      stopServerTimer();
+      return;
+    }
+
+    const prev = timerState.remaining;
+    const next = Math.max(prev - 1, 0);
+    timerState.remaining = next;
+
+    // Broadcast the updated time to all clients
+    io.emit('timer-sync', timerState);
+    console.log(`[${new Date().toISOString()}] Timer tick: ${timerState.phase} - ${next}s remaining`);
+
+    // Handle phase auto-advance when time hits 0
+    if (next === 0) {
+      setTimeout(() => {
+        if (timerState.phase === 'climb') {
+          if (totalTrans() > 0) {
+            timerState.phase = 'transition';
+            timerState.remaining = totalTrans();
+          } else {
+            timerState.phase = 'climb';
+            timerState.remaining = totalClimb();
+          }
+        } else if (timerState.phase === 'transition') {
+          timerState.phase = 'climb';
+          timerState.remaining = totalClimb();
+        }
+        console.log(`[${new Date().toISOString()}] Phase advanced to: ${timerState.phase}`);
+        io.emit('timer-sync', timerState);
+      }, 1000); // Advance after the 0 is displayed for 1 second
+    }
+  }, 1000);
+}
+
+function stopServerTimer() {
+  if (timerInterval) {
+    clearInterval(timerInterval);
+    timerInterval = null;
+    console.log(`[${new Date().toISOString()}] Server timer stopped`);
+  }
+}
+
 io.on('connection', (socket) => {
   connectedClients++;
   const clientId = socket.id.substring(0, 8);
@@ -67,13 +122,24 @@ io.on('connection', (socket) => {
     try {
       // Validate incoming state
       if (typeof newState === 'object' && newState !== null) {
+        const wasRunning = timerState.running;
+
         // Update the server's state
         timerState = { ...timerState, ...newState };
 
-        // Broadcast the new state to all OTHER clients (not the sender)
-        socket.broadcast.emit('timer-sync', timerState);
+        // Start or stop the server timer based on running state
+        if (timerState.running && !wasRunning) {
+          startServerTimer();
+          console.log(`[${new Date().toISOString()}] Timer started by ${clientId}`);
+        } else if (!timerState.running && wasRunning) {
+          stopServerTimer();
+          console.log(`[${new Date().toISOString()}] Timer stopped by ${clientId}`);
+        }
 
-        console.log(`[${new Date().toISOString()}] Timer updated by ${clientId}: phase=${timerState.phase}, remaining=${timerState.remaining}`);
+        // Broadcast the new state to ALL clients
+        io.emit('timer-sync', timerState);
+
+        console.log(`[${new Date().toISOString()}] Timer updated by ${clientId}: phase=${timerState.phase}, remaining=${timerState.remaining}, running=${timerState.running}`);
       }
     } catch (error) {
       console.error(`[${new Date().toISOString()}] Error updating timer:`, error);

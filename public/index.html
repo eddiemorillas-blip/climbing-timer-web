@@ -178,7 +178,8 @@
       audioCtx: null,
       masterGain: null,
       compressor: null,
-      syncInProgress: false  // Flag to prevent sync loops
+      syncInProgress: false,  // Flag to prevent sync loops
+      lastPhaseChangeTime: 0  // Track when we last changed phase
     };
 
     function ensureAudio(){
@@ -324,6 +325,16 @@
 
     function advancePhase() {
       if (!state.running) return;
+      // If we're receiving a sync, don't advance again
+      if (state.syncInProgress) return;
+
+      // If another client advanced in the last 2 seconds, don't advance again
+      const now = Date.now();
+      if (now - state.lastPhaseChangeTime < 2000) {
+        console.log('Skipping phase advance - another client already advanced');
+        return;
+      }
+
       if (state.phase === 'climb') {
         if (totalTrans() > 0) {
           state.phase = 'transition';
@@ -337,6 +348,7 @@
         state.remaining = totalClimb();
         climbStartTone();
       }
+      state.lastPhaseChangeTime = now;
       updateDisplay();
       emitState();  // Sync to all clients
     }
@@ -358,6 +370,7 @@
         state.phase = 'climb';
         state.remaining = totalClimb();
       }
+      state.lastPhaseChangeTime = Date.now();
       updateDisplay();
       emitState();  // Sync to all clients
     }
@@ -401,6 +414,7 @@
       state.syncInProgress = true;  // Prevent re-emitting during sync
 
       const wasRunning = state.running;
+      const oldPhase = state.phase;
 
       // Update local state from server
       state.climbMin = serverState.climbMin;
@@ -410,6 +424,12 @@
       state.phase = serverState.phase;
       state.running = serverState.running;
       state.remaining = serverState.remaining;
+
+      // If phase changed from another client, record the time
+      if (oldPhase !== serverState.phase) {
+        state.lastPhaseChangeTime = Date.now();
+        console.log('Phase change received from another client:', oldPhase, '->', serverState.phase);
+      }
 
       // Update input fields
       document.getElementById('climbMin').value = state.climbMin;

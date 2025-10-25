@@ -1,0 +1,29 @@
+{
+  "name": "climbing-timer-web",
+  "version": "1.0.0",
+  "description": "Real-time climbing competition timer with WebSocket sync - cloud-hosted with Socket.IO",
+  "main": "server.js",
+  "scripts": {
+    "start": "NODE_ENV=production node server.js",
+    "dev": "NODE_ENV=development node server.js",
+    "test": "node server.js"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  },
+  "keywords": [
+    "climbing",
+    "timer",
+    "websocket",
+    "realtime",
+    "socketio",
+    "competition"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "socket.io": "^4.6.1"
+  }
+}

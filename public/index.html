@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@700&display=swap" rel="stylesheet">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Climbing Competition Timer</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    /* Dark mode for input boxes */
+    input[type="number"] {
+      background: #222 !important;
+      color: #fff !important;
+      border: 1px solid #fff !important;
+      box-shadow: none !important;
+    }
+    input[type="number"]:focus {
+      outline: 2px solid #fff !important;
+      background: #333 !important;
+    }
+    /* Ensure dark mode in fullscreen */
+    #timerCard:fullscreen, #timerCard:fullscreen * {
+      background: #111 !important;
+      color: #fff !important;
+      border-color: #fff !important;
+    }
+    .tabular-nums { font-variant-numeric: tabular-nums; }
+
+    /* Fullscreen layout & typography */
+    #timerCard:fullscreen {
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      width: 100vw; height: 100vh; padding: 0; margin: 0; border-radius: 0; box-shadow: none; background: white;
+    }
+    #timerCard:fullscreen #timeDisplay {
+      font-family: 'Roboto Mono', 'Consolas', 'Menlo', 'Monaco', monospace;
+      font-size: 28vw;
+      line-height: 0.95;
+      margin: 0;
+      letter-spacing: 0.04em;
+    }
+    #timerCard:fullscreen #phaseLabel {
+      font-size: 4vw;
+      margin-top: 2.5vw;
+      margin-bottom: 2vw;
+    }
+    #timerCard:fullscreen .control-btn { font-size: 2.8vw; padding: 1.25em 1em; }
+
+    /* Hide UI in fullscreen while running; show only time */
+    #timerCard:fullscreen.fs-running .controls,
+    #timerCard:fullscreen.fs-running .hint {
+      opacity: 0; pointer-events: none; visibility: hidden; transition: opacity 120ms ease;
+    }
+    /* When mouse moves, show controls briefly */
+    #timerCard:fullscreen.fs-running.show-ui #phaseLabel,
+    #timerCard:fullscreen.fs-running.show-ui .controls,
+    #timerCard:fullscreen.fs-running.show-ui .hint {
+      opacity: 1; pointer-events: auto; visibility: visible;
+    }
+
+    /* Connection status indicator */
+    .status-dot {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      margin-right: 6px;
+    }
+    .status-connected { background-color: #22c55e; }
+    .status-disconnected { background-color: #ef4444; }
+  </style>
+</head>
+<body class="min-h-screen bg-black text-white">
+  <div class="max-w-3xl mx-auto p-6">
+    <header class="mb-6 flex items-center justify-between">
+      <h1 class="text-2xl sm:text-3xl font-bold">Climbing Competition Timer</h1>
+      <div class="flex gap-2 items-center">
+        <div class="px-3 py-2 rounded-2xl bg-white bg-opacity-10 text-white text-sm flex items-center">
+          <span class="status-dot status-disconnected" id="statusDot"></span>
+          <span id="connectionStatus">Connecting...</span>
+        </div>
+        <button class="px-3 py-2 rounded-2xl bg-white bg-opacity-10 text-white shadow hover:bg-opacity-30 border border-white text-sm" id="fullscreenBtn" title="Fullscreen Timer">⛶</button>
+      </div>
+    </header>
+
+    <!-- Config Grid -->
+    <div class="grid md:grid-cols-2 gap-4 mb-6">
+  <div class="bg-gray-900 rounded-2xl shadow p-4">
+        <h2 class="font-semibold text-lg mb-3">Climbing Time</h2>
+        <div class="flex items-end gap-2">
+          <label class="grid gap-1">
+            <span class="text-xs text-gray-500">Min</span>
+            <input id="climbMin" type="number" min="0" value="4" class="w-24 px-3 py-2 rounded-xl border bg-white shadow-inner" />
+          </label>
+          <span class="pb-6 text-xl">:</span>
+          <label class="grid gap-1">
+            <span class="text-xs text-gray-500">Sec</span>
+            <input id="climbSec" type="number" min="0" max="59" value="0" class="w-24 px-3 py-2 rounded-xl border bg-white shadow-inner" />
+          </label>
+        </div>
+      </div>
+
+  <div class="bg-gray-900 rounded-2xl shadow p-4">
+        <h2 class="font-semibold text-lg mb-3">Transition Time</h2>
+        <div class="flex items-end gap-2">
+          <label class="grid gap-1">
+            <span class="text-xs text-gray-500">Min</span>
+            <input id="transMin" type="number" min="0" value="1" class="w-24 px-3 py-2 rounded-xl border bg-white shadow-inner" />
+          </label>
+          <span class="pb-6 text-xl">:</span>
+          <label class="grid gap-1">
+            <span class="text-xs text-gray-500">Sec</span>
+            <input id="transSec" type="number" min="0" max="59" value="0" class="w-24 px-3 py-2 rounded-xl border bg-white shadow-inner" />
+          </label>
+        </div>
+        <p class="text-xs text-gray-500 mt-2">Transition runs automatically between climbs.</p>
+      </div>
+    </div>
+
+    <!-- Display Card (Fullscreen Target) -->
+  <div id="timerCard" class="bg-gray-900 rounded-3xl shadow p-6 md:p-10 mb-6 text-center">
+  <div class="text-sm uppercase tracking-wide text-gray-300 mb-2">Phase</div>
+      <div id="phaseLabel" class="text-2xl font-semibold mb-4">Ready</div>
+
+  <div id="timeDisplay" class="text-7xl md:text-8xl font-black tabular-nums leading-none mb-6" style="font-family: 'Roboto Mono', 'Consolas', 'Menlo', 'Monaco', monospace; letter-spacing: 0.04em;">04:00</div>
+
+      <div id="controls" class="controls flex flex-wrap items-center justify-center gap-3">
+        <button id="startPause" class="control-btn px-5 py-3 rounded-2xl bg-white bg-opacity-10 text-white font-semibold shadow hover:bg-opacity-30 border border-white">Start</button>
+        <button id="reset" class="control-btn px-5 py-3 rounded-2xl bg-white bg-opacity-10 text-white font-semibold shadow hover:bg-opacity-30 border border-white">Reset</button>
+        <button id="nextPhase" class="control-btn px-5 py-3 rounded-2xl bg-white bg-opacity-10 text-white font-semibold shadow hover:bg-opacity-30 border border-white">Next Phase</button>
+        <button id="testSound" class="control-btn px-5 py-3 rounded-2xl bg-white bg-opacity-10 text-white font-semibold shadow hover:bg-opacity-30 border border-white" title="Play a sample beep">Test Sound</button>
+      </div>
+
+  <p class="hint text-xs text-gray-300 mt-4">Tones: 1 beep at 1:00 left (climb), short beeps at 5..4..3..2..1, and a distinct buzzer at the end of climb. Move mouse to show controls in fullscreen.</p>
+    </div>
+
+  <footer class="text-center text-xs text-gray-300">
+      <span id="clientCount">Connected clients: 0</span> •
+      Pro tip: Click a preset above, then Start. Sounds require a user gesture on some browsers; if you don't hear anything, press Start/Resume once.
+    </footer>
+  </div>
+
+  <!-- Socket.IO Client Library -->
+  <script src="/socket.io/socket.io.js"></script>
+
+  <script>
+    // --- Socket.IO Connection ---
+    const socket = io();
+    let isConnected = false;
+
+    socket.on('connect', () => {
+      isConnected = true;
+      document.getElementById('statusDot').className = 'status-dot status-connected';
+      document.getElementById('connectionStatus').textContent = 'Connected';
+      console.log('Connected to server');
+    });
+
+    socket.on('disconnect', () => {
+      isConnected = false;
+      document.getElementById('statusDot').className = 'status-dot status-disconnected';
+      document.getElementById('connectionStatus').textContent = 'Disconnected';
+      console.log('Disconnected from server');
+    });
+
+    socket.on('client-count', (count) => {
+      document.getElementById('clientCount').textContent = `Connected clients: ${count}`;
+    });
+
+    // --- App State & Audio ---
+    const state = {
+      climbMin: 4,
+      climbSec: 0,
+      transMin: 1,
+      transSec: 0,
+      phase: 'stopped',
+      running: false,
+      remaining: 240,
+      intervalId: null,
+      audioCtx: null,
+      masterGain: null,
+      compressor: null,
+      syncInProgress: false  // Flag to prevent sync loops
+    };
+
+    function ensureAudio(){
+      if (!state.audioCtx) {
+        try {
+          const Ctx = window.AudioContext || window.webkitAudioContext;
+          const ctx = new Ctx();
+          const master = ctx.createGain();
+          master.gain.value = 0.9;
+          const comp = ctx.createDynamicsCompressor();
+          comp.threshold.setValueAtTime(-12, ctx.currentTime);
+          comp.knee.setValueAtTime(30, ctx.currentTime);
+          comp.ratio.setValueAtTime(12, ctx.currentTime);
+          comp.attack.setValueAtTime(0.003, ctx.currentTime);
+          comp.release.setValueAtTime(0.25, ctx.currentTime);
+          master.connect(comp);
+          comp.connect(ctx.destination);
+          state.audioCtx = ctx;
+          state.masterGain = master;
+          state.compressor = comp;
+        } catch(e){ /* ignore */ }
+      }
+      if (state.audioCtx && state.audioCtx.state === 'suspended') {
+        state.audioCtx.resume().catch(()=>{});
+      }
+    }
+
+    function connectEnv(){
+      const ctx = state.audioCtx; const env = ctx.createGain();
+      const now = ctx.currentTime;
+      env.gain.setValueAtTime(0, now);
+      env.gain.linearRampToValueAtTime(1, now + 0.01);
+      env.gain.exponentialRampToValueAtTime(0.001, now + 1.5);
+      env.connect(state.masterGain);
+      return env;
+    }
+
+    function beep(freq=880, seconds=0.45, type='sine'){
+      const ctx = state.audioCtx; if (!ctx) return;
+      const env = connectEnv();
+      const osc = ctx.createOscillator();
+      osc.type = type; osc.frequency.value = freq;
+      osc.connect(env);
+      const now = ctx.currentTime;
+      osc.start(now); osc.stop(now + seconds + 0.05);
+    }
+
+    function buzzer(seconds=2.0){
+      const ctx = state.audioCtx; if (!ctx) return;
+      const now = ctx.currentTime;
+      const env = ctx.createGain();
+      env.gain.setValueAtTime(1, now);
+      env.gain.linearRampToValueAtTime(0, now + seconds);
+      const osc = ctx.createOscillator();
+      osc.type = 'sawtooth';
+      osc.frequency.value = 100;
+      osc.connect(env);
+      env.connect(state.masterGain);
+      osc.start(now);
+      osc.stop(now + seconds);
+
+      const noiseDur = 0.5;
+      const noiseBuf = ctx.createBuffer(1, ctx.sampleRate * noiseDur, ctx.sampleRate);
+      const data = noiseBuf.getChannelData(0);
+      for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * 0.4;
+      const noise = ctx.createBufferSource();
+      noise.buffer = noiseBuf;
+      const band = ctx.createBiquadFilter();
+      band.type = 'bandpass';
+      band.frequency.value = 800;
+      band.Q.value = 0.7;
+      noise.connect(band);
+      const env2 = ctx.createGain();
+      band.connect(env2);
+      env2.connect(state.masterGain);
+      env2.gain.setValueAtTime(0.7, now);
+      env2.gain.linearRampToValueAtTime(0, now + noiseDur);
+      noise.start(now);
+      noise.stop(now + noiseDur);
+    }
+
+    function climbStartTone() {
+      const ctx = state.audioCtx; if (!ctx) return;
+      const env = connectEnv();
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      osc.type = 'triangle';
+      osc.frequency.value = 660;
+      osc.connect(env);
+      env.connect(state.masterGain);
+      osc.start(now);
+      osc.stop(now + 2.0);
+    }
+
+    const clamp = (n, min, max) => Math.max(min, Math.min(max, Math.trunc(Number(n)||0)));
+    const totalClimb = () => clamp(state.climbMin,0,999)*60 + clamp(state.climbSec,0,59);
+    const totalTrans = () => clamp(state.transMin,0,999)*60 + clamp(state.transSec,0,59);
+    const fmt = (s) => { s = Math.max(0, Math.floor(s)); const m = Math.floor(s/60), r = s%60; return String(m).padStart(2,'0') + ':' + String(r).padStart(2,'0'); };
+
+    function updateDisplay(){
+      document.getElementById('timeDisplay').textContent = fmt(state.remaining);
+      document.getElementById('phaseLabel').textContent = state.phase === 'stopped' ? 'Ready' : (state.phase === 'climb' ? 'Climb' : 'Transition');
+      document.getElementById('startPause').textContent = state.running ? 'Pause' : (state.phase === 'stopped' ? 'Start' : 'Resume');
+    }
+
+    // Emit state to server
+    function emitState() {
+      if (!state.syncInProgress && isConnected) {
+        socket.emit('timer-update', {
+          climbMin: state.climbMin,
+          climbSec: state.climbSec,
+          transMin: state.transMin,
+          transSec: state.transSec,
+          phase: state.phase,
+          running: state.running,
+          remaining: state.remaining
+        });
+      }
+    }
+
+    function startPause(){
+      ensureAudio();
+      if (state.phase === 'stopped') {
+        state.phase = 'climb';
+        state.remaining = totalClimb();
+        climbStartTone();
+      }
+      state.running = !state.running;
+      if (state.running) tickStart(); else tickStop();
+      updateDisplay();
+      refreshUiVisibility(true);
+      emitState();  // Sync to all clients
+    }
+
+    function resetAll(){
+      tickStop();
+      state.running = false;
+      state.phase = 'stopped';
+      state.remaining = totalClimb();
+      updateDisplay();
+      emitState();  // Sync to all clients
+    }
+
+    function advancePhase() {
+      if (!state.running) return;
+      if (state.phase === 'climb') {
+        if (totalTrans() > 0) {
+          state.phase = 'transition';
+          state.remaining = totalTrans();
+        } else {
+          state.phase = 'climb';
+          state.remaining = totalClimb();
+        }
+      } else if (state.phase === 'transition') {
+        state.phase = 'climb';
+        state.remaining = totalClimb();
+        climbStartTone();
+      }
+      updateDisplay();
+      emitState();  // Sync to all clients
+    }
+
+    function nextPhase(){
+      tickStop();
+      if (state.phase === 'climb') {
+        if (totalTrans() > 0) {
+          state.phase = 'transition';
+          state.remaining = totalTrans();
+        } else {
+          state.phase = 'stopped';
+          state.remaining = totalClimb();
+        }
+      } else if (state.phase === 'transition') {
+        state.phase = 'climb';
+        state.remaining = totalClimb();
+      } else {
+        state.phase = 'climb';
+        state.remaining = totalClimb();
+      }
+      updateDisplay();
+      emitState();  // Sync to all clients
+    }
+
+    function tickStart(){
+      if (state.intervalId) return;
+      state.intervalId = setInterval(() => {
+        const prev = state.remaining;
+        const next = Math.max(prev - 1, 0);
+        if (state.phase === 'climb') {
+          if (next === 60) {
+            beep(800, 0.65, 'sine');
+          } else if (next <= 5 && next > 0) {
+            beep(1200, 0.45, 'square');
+          } else if (next === 0) {
+            buzzer(1.4);
+          }
+        }
+        state.remaining = next;
+        updateDisplay();
+        emitState();  // Sync every second
+        if (next === 0) {
+          setTimeout(() => {
+            advancePhase();
+            if (state.running && state.phase !== 'stopped') {
+              // Keep ticking
+            } else {
+              tickStop();
+            }
+          }, 0);
+        }
+      }, 1000);
+    }
+
+    function tickStop(){
+      if (state.intervalId) { clearInterval(state.intervalId); state.intervalId = null; }
+    }
+
+    // --- Listen for state updates from server ---
+    socket.on('timer-sync', (serverState) => {
+      state.syncInProgress = true;  // Prevent re-emitting during sync
+
+      const wasRunning = state.running;
+
+      // Update local state from server
+      state.climbMin = serverState.climbMin;
+      state.climbSec = serverState.climbSec;
+      state.transMin = serverState.transMin;
+      state.transSec = serverState.transSec;
+      state.phase = serverState.phase;
+      state.running = serverState.running;
+      state.remaining = serverState.remaining;
+
+      // Update input fields
+      document.getElementById('climbMin').value = state.climbMin;
+      document.getElementById('climbSec').value = state.climbSec;
+      document.getElementById('transMin').value = state.transMin;
+      document.getElementById('transSec').value = state.transSec;
+
+      // Handle timer running state
+      if (serverState.running && !wasRunning) {
+        tickStart();
+      } else if (!serverState.running && wasRunning) {
+        tickStop();
+      }
+
+      updateDisplay();
+      refreshUiVisibility(true);
+
+      state.syncInProgress = false;
+    });
+
+    socket.on('config-sync', (config) => {
+      state.syncInProgress = true;
+
+      state.climbMin = config.climbMin;
+      state.climbSec = config.climbSec;
+      state.transMin = config.transMin;
+      state.transSec = config.transSec;
+
+      document.getElementById('climbMin').value = config.climbMin;
+      document.getElementById('climbSec').value = config.climbSec;
+      document.getElementById('transMin').value = config.transMin;
+      document.getElementById('transSec').value = config.transSec;
+
+      if (!state.running && state.phase === 'stopped') {
+        state.remaining = totalClimb();
+        updateDisplay();
+      }
+
+      state.syncInProgress = false;
+    });
+
+    // --- Fullscreen & UI visibility ---
+    const timerCard = document.getElementById('timerCard');
+    const fsBtn = document.getElementById('fullscreenBtn');
+    fsBtn.addEventListener('click', () => {
+      if (!document.fullscreenElement) {
+        timerCard.requestFullscreen().then(() => {
+          refreshUiVisibility(true);
+        }).catch(err => {
+          alert(`Error attempting to enable fullscreen: ${err.message}`);
+        });
+      } else {
+        document.exitFullscreen();
+      }
+    });
+
+    let uiHideTimer = null;
+    function refreshUiVisibility(forceShow=false) {
+      const inFS = !!document.fullscreenElement;
+      if (inFS && state.running) {
+        timerCard.classList.add('fs-running');
+        if (forceShow) {
+          timerCard.classList.add('show-ui');
+          clearTimeout(uiHideTimer);
+          uiHideTimer = setTimeout(() => timerCard.classList.remove('show-ui'), 2000);
+        }
+      } else {
+        timerCard.classList.remove('fs-running');
+        timerCard.classList.add('show-ui');
+      }
+    }
+
+    ['mousemove','mousedown','keydown','touchstart','pointermove'].forEach(evt => {
+      document.addEventListener(evt, () => refreshUiVisibility(true), { passive: true });
+    });
+
+    document.addEventListener('fullscreenchange', () => {
+      refreshUiVisibility(true);
+    });
+
+    // --- Wire controls ---
+    document.getElementById('testSound').addEventListener('click', () => { ensureAudio(); buzzer(0.9); });
+    document.getElementById('startPause').addEventListener('click', startPause);
+    document.getElementById('reset').addEventListener('click', resetAll);
+    document.getElementById('nextPhase').addEventListener('click', nextPhase);
+
+    // Config change handlers with sync
+    document.getElementById('climbMin').addEventListener('input', (e)=>{
+      state.climbMin = clamp(e.target.value,0,999);
+      if(!state.running&&state.phase==='stopped'){
+        state.remaining = totalClimb();
+        updateDisplay();
+      }
+      if (!state.syncInProgress) {
+        socket.emit('config-update', {
+          climbMin: state.climbMin,
+          climbSec: state.climbSec,
+          transMin: state.transMin,
+          transSec: state.transSec
+        });
+      }
+    });
+
+    document.getElementById('climbSec').addEventListener('input', (e)=>{
+      state.climbSec = clamp(e.target.value,0,59);
+      if(!state.running&&state.phase==='stopped'){
+        state.remaining = totalClimb();
+        updateDisplay();
+      }
+      if (!state.syncInProgress) {
+        socket.emit('config-update', {
+          climbMin: state.climbMin,
+          climbSec: state.climbSec,
+          transMin: state.transMin,
+          transSec: state.transSec
+        });
+      }
+    });
+
+    document.getElementById('transMin').addEventListener('input', (e)=>{
+      state.transMin = clamp(e.target.value,0,999);
+      if (!state.syncInProgress) {
+        socket.emit('config-update', {
+          climbMin: state.climbMin,
+          climbSec: state.climbSec,
+          transMin: state.transMin,
+          transSec: state.transSec
+        });
+      }
+    });
+
+    document.getElementById('transSec').addEventListener('input', (e)=>{
+      state.transSec = clamp(e.target.value,0,59);
+      if (!state.syncInProgress) {
+        socket.emit('config-update', {
+          climbMin: state.climbMin,
+          climbSec: state.climbSec,
+          transMin: state.transMin,
+          transSec: state.transSec
+        });
+      }
+    });
+
+    // Init
+    updateDisplay();
+  </script>
+</body>
+</html>

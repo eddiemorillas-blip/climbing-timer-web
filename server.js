@@ -45,7 +45,21 @@ let timerState = {
   transSec: 0,
   phase: 'stopped',
   running: false,
-  remaining: 240
+  remaining: 240,
+  categories: []
+  // categories structure:
+  // [
+  //   {
+  //     id: 1,
+  //     name: "Women 18-24",
+  //     boulders: [
+  //       { boulderId: 1, climbers: ["Name1", "Name2", ...], currentClimberIndex: 0 },
+  //       { boulderId: 2, climbers: ["Name1", "Name2", ...], currentClimberIndex: 0 },
+  //       { boulderId: 3, climbers: ["Name1", "Name2", ...], currentClimberIndex: 0 },
+  //       { boulderId: 4, climbers: ["Name1", "Name2", ...], currentClimberIndex: 0 }
+  //     ]
+  //   }
+  // ]
 };
 
 // Track connected clients
@@ -113,6 +127,7 @@ io.on('connection', (socket) => {
 
   // Send the current timer state to the newly connected client
   socket.emit('timer-sync', timerState);
+  socket.emit('categories-sync', timerState.categories);
 
   // Broadcast the updated client count to all clients
   io.emit('client-count', connectedClients);
@@ -162,6 +177,115 @@ io.on('connection', (socket) => {
       }
     } catch (error) {
       console.error(`[${new Date().toISOString()}] Error updating config:`, error);
+    }
+  });
+
+  // Listen for category add/update
+  socket.on('category-update', (category) => {
+    try {
+      if (typeof category === 'object' && category !== null) {
+        const existingIndex = timerState.categories.findIndex(c => c.id === category.id);
+
+        if (existingIndex >= 0) {
+          // Update existing category
+          timerState.categories[existingIndex] = category;
+          console.log(`[${new Date().toISOString()}] Category updated by ${clientId}: ${category.name}`);
+        } else {
+          // Add new category
+          timerState.categories.push(category);
+          console.log(`[${new Date().toISOString()}] Category added by ${clientId}: ${category.name}`);
+        }
+
+        // Broadcast to all clients
+        io.emit('categories-sync', timerState.categories);
+      }
+    } catch (error) {
+      console.error(`[${new Date().toISOString()}] Error updating category:`, error);
+    }
+  });
+
+  // Listen for category delete
+  socket.on('category-delete', (categoryId) => {
+    try {
+      const initialLength = timerState.categories.length;
+      timerState.categories = timerState.categories.filter(c => c.id !== categoryId);
+
+      if (timerState.categories.length < initialLength) {
+        console.log(`[${new Date().toISOString()}] Category deleted by ${clientId}: ID ${categoryId}`);
+        io.emit('categories-sync', timerState.categories);
+      }
+    } catch (error) {
+      console.error(`[${new Date().toISOString()}] Error deleting category:`, error);
+    }
+  });
+
+  // Listen for climber advancement (specific category and boulder)
+  socket.on('advance-climber', (data) => {
+    try {
+      const { categoryId, boulderId } = data;
+      const category = timerState.categories.find(c => c.id === categoryId);
+
+      if (category) {
+        const boulder = category.boulders.find(b => b.boulderId === boulderId);
+        if (boulder && boulder.climbers.length > 0) {
+          boulder.currentClimberIndex = (boulder.currentClimberIndex + 1) % boulder.climbers.length;
+          console.log(`[${new Date().toISOString()}] Climber advanced by ${clientId}: ${category.name} - Boulder ${boulderId}`);
+          io.emit('categories-sync', timerState.categories);
+        }
+      }
+    } catch (error) {
+      console.error(`[${new Date().toISOString()}] Error advancing climber:`, error);
+    }
+  });
+
+  // Listen for advance all climbers in a specific boulder
+  socket.on('advance-boulder', (boulderId) => {
+    try {
+      timerState.categories.forEach(category => {
+        const boulder = category.boulders.find(b => b.boulderId === boulderId);
+        if (boulder && boulder.climbers.length > 0) {
+          boulder.currentClimberIndex = (boulder.currentClimberIndex + 1) % boulder.climbers.length;
+        }
+      });
+      console.log(`[${new Date().toISOString()}] All climbers advanced on Boulder ${boulderId} by ${clientId}`);
+      io.emit('categories-sync', timerState.categories);
+    } catch (error) {
+      console.error(`[${new Date().toISOString()}] Error advancing boulder:`, error);
+    }
+  });
+
+  // Listen for advance all climbers in a specific category
+  socket.on('advance-category', (categoryId) => {
+    try {
+      const category = timerState.categories.find(c => c.id === categoryId);
+      if (category) {
+        category.boulders.forEach(boulder => {
+          if (boulder.climbers.length > 0) {
+            boulder.currentClimberIndex = (boulder.currentClimberIndex + 1) % boulder.climbers.length;
+          }
+        });
+        console.log(`[${new Date().toISOString()}] All climbers advanced in category ${category.name} by ${clientId}`);
+        io.emit('categories-sync', timerState.categories);
+      }
+    } catch (error) {
+      console.error(`[${new Date().toISOString()}] Error advancing category:`, error);
+    }
+  });
+
+  // Listen for advance all climbers (all categories, all boulders)
+  socket.on('advance-all-climbers', () => {
+    try {
+      timerState.categories.forEach(category => {
+        category.boulders.forEach(boulder => {
+          if (boulder.climbers.length > 0) {
+            boulder.currentClimberIndex = (boulder.currentClimberIndex + 1) % boulder.climbers.length;
+          }
+        });
+      });
+      console.log(`[${new Date().toISOString()}] All climbers advanced by ${clientId}`);
+      io.emit('categories-sync', timerState.categories);
+    } catch (error) {
+      console.error(`[${new Date().toISOString()}] Error advancing all climbers:`, error);
     }
   });
 

@@ -67,6 +67,63 @@
     }
     .status-connected { background-color: #22c55e; }
     .status-disconnected { background-color: #ef4444; }
+
+    /* Climber Grid - Dynamic Scaling */
+    .climber-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 0.5rem;
+      margin-bottom: 2rem;
+      width: 100%;
+    }
+    .climber-cell {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 0.75rem;
+      padding: 0.75rem;
+      text-align: center;
+    }
+    .boulder-header {
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: rgba(255, 255, 255, 0.6);
+      margin-bottom: 0.25rem;
+    }
+    .category-name {
+      font-size: 0.85rem;
+      color: rgba(255, 255, 255, 0.8);
+      margin-bottom: 0.5rem;
+    }
+    .climber-name {
+      font-weight: 700;
+      line-height: 1.2;
+      margin-bottom: 0.25rem;
+    }
+    .climber-count {
+      font-size: 0.7rem;
+      color: rgba(255, 255, 255, 0.5);
+    }
+
+    /* Dynamic font sizing based on number of categories */
+    .climber-grid[data-categories="1"] .climber-name { font-size: 2rem; }
+    .climber-grid[data-categories="2"] .climber-name { font-size: 1.5rem; }
+    .climber-grid[data-categories="3"] .climber-name { font-size: 1.25rem; }
+    .climber-grid[data-categories="4"] .climber-name { font-size: 1rem; }
+
+    /* Fullscreen climber grid scaling */
+    #timerCard:fullscreen .climber-grid {
+      gap: 1rem;
+      margin-bottom: 3rem;
+    }
+    #timerCard:fullscreen .climber-grid[data-categories="1"] .climber-name { font-size: 4.5vw; }
+    #timerCard:fullscreen .climber-grid[data-categories="2"] .climber-name { font-size: 3.5vw; }
+    #timerCard:fullscreen .climber-grid[data-categories="3"] .climber-name { font-size: 2.8vw; }
+    #timerCard:fullscreen .climber-grid[data-categories="4"] .climber-name { font-size: 2.2vw; }
+    #timerCard:fullscreen .boulder-header { font-size: 1.5vw; }
+    #timerCard:fullscreen .category-name { font-size: 1.8vw; }
+    #timerCard:fullscreen .climber-count { font-size: 1.2vw; }
   </style>
 </head>
 <body class="min-h-screen bg-black text-white">
@@ -116,8 +173,24 @@
       </div>
     </div>
 
+    <!-- Category Management -->
+    <div class="bg-gray-900 rounded-2xl shadow p-4 mb-6">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="font-semibold text-lg">Categories & Climbers</h2>
+        <button id="addCategoryBtn" class="px-4 py-2 rounded-xl bg-green-600 hover:bg-green-700 text-white text-sm font-semibold" title="Add Category (Max 4)">+ Add Category</button>
+      </div>
+      <div id="categoriesList" class="space-y-3">
+        <p class="text-sm text-gray-400">No categories yet. Click "Add Category" to get started.</p>
+      </div>
+    </div>
+
     <!-- Display Card (Fullscreen Target) -->
   <div id="timerCard" class="bg-gray-900 rounded-3xl shadow p-6 md:p-10 mb-6 text-center">
+      <!-- Climber Display Grid -->
+      <div id="climberGrid" class="climber-grid" data-categories="0" style="display: none;">
+        <!-- Dynamically populated by JavaScript -->
+      </div>
+
   <div class="text-sm uppercase tracking-wide text-gray-300 mb-2">Phase</div>
       <div id="phaseLabel" class="text-2xl font-semibold mb-4">Ready</div>
 
@@ -128,6 +201,15 @@
         <button id="reset" class="control-btn px-5 py-3 rounded-2xl bg-white bg-opacity-10 text-white font-semibold shadow hover:bg-opacity-30 border border-white">Reset</button>
         <button id="nextPhase" class="control-btn px-5 py-3 rounded-2xl bg-white bg-opacity-10 text-white font-semibold shadow hover:bg-opacity-30 border border-white">Next Phase</button>
         <button id="testSound" class="control-btn px-5 py-3 rounded-2xl bg-white bg-opacity-10 text-white font-semibold shadow hover:bg-opacity-30 border border-white" title="Play a sample beep">Test Sound</button>
+      </div>
+
+      <!-- Climber Navigation Controls -->
+      <div id="climberControls" class="controls flex flex-wrap items-center justify-center gap-2 mt-4" style="display: none;">
+        <button id="nextAllClimbersBtn" class="control-btn px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold">Next All Climbers</button>
+        <button id="nextBoulder1Btn" class="control-btn px-3 py-2 rounded-xl bg-white bg-opacity-10 text-white text-xs font-semibold hover:bg-opacity-20 border border-white">Next B1</button>
+        <button id="nextBoulder2Btn" class="control-btn px-3 py-2 rounded-xl bg-white bg-opacity-10 text-white text-xs font-semibold hover:bg-opacity-20 border border-white">Next B2</button>
+        <button id="nextBoulder3Btn" class="control-btn px-3 py-2 rounded-xl bg-white bg-opacity-10 text-white text-xs font-semibold hover:bg-opacity-20 border border-white">Next B3</button>
+        <button id="nextBoulder4Btn" class="control-btn px-3 py-2 rounded-xl bg-white bg-opacity-10 text-white text-xs font-semibold hover:bg-opacity-20 border border-white">Next B4</button>
       </div>
 
   <p class="hint text-xs text-gray-300 mt-4">Tones: 1 beep at 1:00 left (climb), short beeps at 5..4..3..2..1, and a distinct buzzer at the end of climb. Move mouse to show controls in fullscreen.</p>
@@ -179,7 +261,8 @@
       masterGain: null,
       compressor: null,
       syncInProgress: false,  // Flag to prevent sync loops
-      lastPhaseChangeTime: 0  // Track when we last changed phase
+      lastPhaseChangeTime: 0,  // Track when we last changed phase
+      categories: []  // Categories with climbers for 4 boulders
     };
 
     function ensureAudio(){
@@ -427,6 +510,152 @@
       state.syncInProgress = false;
     });
 
+    // --- Listen for category updates from server ---
+    socket.on('categories-sync', (categories) => {
+      state.categories = categories || [];
+      renderCategoriesList();
+      renderClimberGrid();
+    });
+
+    // --- Category Management Functions ---
+    function renderCategoriesList() {
+      const container = document.getElementById('categoriesList');
+
+      if (state.categories.length === 0) {
+        container.innerHTML = '<p class="text-sm text-gray-400">No categories yet. Click "Add Category" to get started.</p>';
+        return;
+      }
+
+      container.innerHTML = state.categories.map(category => `
+        <div class="bg-gray-800 rounded-xl p-4 border border-gray-700">
+          <div class="flex items-start justify-between mb-3">
+            <div class="flex-1">
+              <input type="text"
+                value="${category.name}"
+                class="category-name-input bg-gray-700 text-white px-3 py-2 rounded-lg w-full font-semibold text-lg"
+                data-category-id="${category.id}"
+                placeholder="Category Name (e.g., Women 18-24)" />
+            </div>
+            <button class="delete-category-btn ml-3 px-3 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white text-sm font-semibold" data-category-id="${category.id}">Delete</button>
+          </div>
+          <div class="mb-3">
+            <label class="block text-sm text-gray-400 mb-2">Import Climbers (one name per line)</label>
+            <textarea
+              class="climbers-textarea bg-gray-700 text-white px-3 py-2 rounded-lg w-full text-sm font-mono"
+              data-category-id="${category.id}"
+              rows="4"
+              placeholder="Sarah Johnson&#10;Emily Chen&#10;Maria Garcia">${(category.boulders[0]?.climbers || []).join('\n')}</textarea>
+            <button class="import-climbers-btn mt-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold" data-category-id="${category.id}">Import Climbers</button>
+          </div>
+          <div class="text-sm text-gray-400">
+            ${category.boulders[0]?.climbers?.length || 0} climbers imported
+          </div>
+        </div>
+      `).join('');
+
+      // Wire up event listeners
+      document.querySelectorAll('.category-name-input').forEach(input => {
+        input.addEventListener('blur', (e) => {
+          const categoryId = parseInt(e.target.dataset.categoryId);
+          const category = state.categories.find(c => c.id === categoryId);
+          if (category) {
+            category.name = e.target.value.trim() || 'Unnamed Category';
+            socket.emit('category-update', category);
+          }
+        });
+      });
+
+      document.querySelectorAll('.delete-category-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          const categoryId = parseInt(e.target.dataset.categoryId);
+          if (confirm('Delete this category?')) {
+            socket.emit('category-delete', categoryId);
+          }
+        });
+      });
+
+      document.querySelectorAll('.import-climbers-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          const categoryId = parseInt(e.target.dataset.categoryId);
+          const textarea = document.querySelector(`.climbers-textarea[data-category-id="${categoryId}"]`);
+          const climbers = textarea.value.split('\n').map(name => name.trim()).filter(name => name.length > 0);
+
+          const category = state.categories.find(c => c.id === categoryId);
+          if (category) {
+            // Update all 4 boulders with the same climber list
+            category.boulders = [
+              { boulderId: 1, climbers: [...climbers], currentClimberIndex: 0 },
+              { boulderId: 2, climbers: [...climbers], currentClimberIndex: 0 },
+              { boulderId: 3, climbers: [...climbers], currentClimberIndex: 0 },
+              { boulderId: 4, climbers: [...climbers], currentClimberIndex: 0 }
+            ];
+            socket.emit('category-update', category);
+          }
+        });
+      });
+    }
+
+    function renderClimberGrid() {
+      const grid = document.getElementById('climberGrid');
+      const controlsDiv = document.getElementById('climberControls');
+
+      if (state.categories.length === 0) {
+        grid.style.display = 'none';
+        controlsDiv.style.display = 'none';
+        return;
+      }
+
+      grid.style.display = 'grid';
+      controlsDiv.style.display = 'flex';
+      grid.setAttribute('data-categories', state.categories.length);
+
+      let html = '';
+
+      // Create 4×categories grid (4 boulders × N categories)
+      for (let categoryIndex = 0; categoryIndex < state.categories.length; categoryIndex++) {
+        const category = state.categories[categoryIndex];
+
+        for (let boulderIndex = 0; boulderIndex < 4; boulderIndex++) {
+          const boulder = category.boulders[boulderIndex];
+          const climber = boulder?.climbers?.[boulder.currentClimberIndex];
+          const climberCount = boulder?.climbers?.length || 0;
+          const currentIndex = boulder?.currentClimberIndex || 0;
+
+          html += `
+            <div class="climber-cell">
+              <div class="boulder-header">Boulder ${boulderIndex + 1}</div>
+              <div class="category-name">${category.name}</div>
+              <div class="climber-name">${climber || '—'}</div>
+              <div class="climber-count">${climberCount > 0 ? `${currentIndex + 1}/${climberCount}` : 'No climbers'}</div>
+            </div>
+          `;
+        }
+      }
+
+      grid.innerHTML = html;
+    }
+
+    function addCategory() {
+      if (state.categories.length >= 4) {
+        alert('Maximum 4 categories allowed');
+        return;
+      }
+
+      const newId = state.categories.length > 0 ? Math.max(...state.categories.map(c => c.id)) + 1 : 1;
+      const newCategory = {
+        id: newId,
+        name: `Category ${newId}`,
+        boulders: [
+          { boulderId: 1, climbers: [], currentClimberIndex: 0 },
+          { boulderId: 2, climbers: [], currentClimberIndex: 0 },
+          { boulderId: 3, climbers: [], currentClimberIndex: 0 },
+          { boulderId: 4, climbers: [], currentClimberIndex: 0 }
+        ]
+      };
+
+      socket.emit('category-update', newCategory);
+    }
+
     // --- Fullscreen & UI visibility ---
     const timerCard = document.getElementById('timerCard');
     const fsBtn = document.getElementById('fullscreenBtn');
@@ -529,8 +758,34 @@
       }
     });
 
+    // --- Wire category management controls ---
+    document.getElementById('addCategoryBtn').addEventListener('click', addCategory);
+
+    // --- Wire climber navigation controls ---
+    document.getElementById('nextAllClimbersBtn').addEventListener('click', () => {
+      socket.emit('advance-all-climbers');
+    });
+
+    document.getElementById('nextBoulder1Btn').addEventListener('click', () => {
+      socket.emit('advance-boulder', 1);
+    });
+
+    document.getElementById('nextBoulder2Btn').addEventListener('click', () => {
+      socket.emit('advance-boulder', 2);
+    });
+
+    document.getElementById('nextBoulder3Btn').addEventListener('click', () => {
+      socket.emit('advance-boulder', 3);
+    });
+
+    document.getElementById('nextBoulder4Btn').addEventListener('click', () => {
+      socket.emit('advance-boulder', 4);
+    });
+
     // Init
     updateDisplay();
+    renderCategoriesList();
+    renderClimberGrid();
   </script>
 </body>
 </html>

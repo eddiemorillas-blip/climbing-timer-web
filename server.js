@@ -53,10 +53,10 @@ let timerState = {
   //     id: 1,
   //     name: "Women 18-24",
   //     boulders: [
-  //       { boulderId: 1, climbers: ["Name1", "Name2", ...], currentClimberIndex: 0 },
-  //       { boulderId: 2, climbers: ["Name1", "Name2", ...], currentClimberIndex: 0 },
-  //       { boulderId: 3, climbers: ["Name1", "Name2", ...], currentClimberIndex: 0 },
-  //       { boulderId: 4, climbers: ["Name1", "Name2", ...], currentClimberIndex: 0 }
+  //       { boulderId: 1, climbers: ["Name1", "Name2", ...], currentClimberIndex: 0, held: false },
+  //       { boulderId: 2, climbers: ["Name1", "Name2", ...], currentClimberIndex: 0, held: false },
+  //       { boulderId: 3, climbers: ["Name1", "Name2", ...], currentClimberIndex: 0, held: false },
+  //       { boulderId: 4, climbers: ["Name1", "Name2", ...], currentClimberIndex: 0, held: false }
   //     ]
   //   }
   // ]
@@ -71,6 +71,19 @@ let timerInterval = null;
 // Helper functions
 const totalClimb = () => timerState.climbMin * 60 + timerState.climbSec;
 const totalTrans = () => timerState.transMin * 60 + timerState.transSec;
+
+// Auto-advance all non-held climbers (called when climb phase ends)
+function advanceNonHeldClimbers() {
+  timerState.categories.forEach(category => {
+    category.boulders.forEach(boulder => {
+      if (boulder.held) return; // Skip held boulders
+      if (boulder.climbers && boulder.climbers.length > 0) {
+        boulder.currentClimberIndex = (boulder.currentClimberIndex + 1) % boulder.climbers.length;
+      }
+    });
+  });
+  console.log(`[${new Date().toISOString()}] Auto-advanced all non-held climbers`);
+}
 
 // Server-side countdown function
 function startServerTimer() {
@@ -94,6 +107,10 @@ function startServerTimer() {
     if (next === 0) {
       setTimeout(() => {
         if (timerState.phase === 'climb') {
+          // Auto-advance climbers before transitioning away from climb phase
+          advanceNonHeldClimbers();
+          io.emit('categories-sync', timerState.categories);
+
           if (totalTrans() > 0) {
             timerState.phase = 'transition';
             timerState.remaining = totalTrans();
@@ -243,7 +260,7 @@ io.on('connection', (socket) => {
     try {
       timerState.categories.forEach(category => {
         const boulder = category.boulders.find(b => b.boulderId === boulderId);
-        if (boulder && boulder.climbers.length > 0) {
+        if (boulder && !boulder.held && boulder.climbers.length > 0) {
           boulder.currentClimberIndex = (boulder.currentClimberIndex + 1) % boulder.climbers.length;
         }
       });
@@ -260,7 +277,7 @@ io.on('connection', (socket) => {
       const category = timerState.categories.find(c => c.id === categoryId);
       if (category) {
         category.boulders.forEach(boulder => {
-          if (boulder.climbers.length > 0) {
+          if (!boulder.held && boulder.climbers.length > 0) {
             boulder.currentClimberIndex = (boulder.currentClimberIndex + 1) % boulder.climbers.length;
           }
         });
@@ -277,6 +294,7 @@ io.on('connection', (socket) => {
     try {
       timerState.categories.forEach(category => {
         category.boulders.forEach(boulder => {
+          if (boulder.held) return; // Skip held boulders
           if (boulder.climbers.length > 0) {
             boulder.currentClimberIndex = (boulder.currentClimberIndex + 1) % boulder.climbers.length;
           }
@@ -286,6 +304,24 @@ io.on('connection', (socket) => {
       io.emit('categories-sync', timerState.categories);
     } catch (error) {
       console.error(`[${new Date().toISOString()}] Error advancing all climbers:`, error);
+    }
+  });
+
+  // Listen for boulder hold toggle
+  socket.on('toggle-boulder-hold', (data) => {
+    try {
+      const { categoryId, boulderId } = data;
+      const category = timerState.categories.find(c => c.id === categoryId);
+      if (category) {
+        const boulder = category.boulders.find(b => b.boulderId === boulderId);
+        if (boulder) {
+          boulder.held = !boulder.held;
+          console.log(`[${new Date().toISOString()}] Boulder ${boulderId} in ${category.name} ${boulder.held ? 'held' : 'released'} by ${clientId}`);
+          io.emit('categories-sync', timerState.categories);
+        }
+      }
+    } catch (error) {
+      console.error(`[${new Date().toISOString()}] Error toggling boulder hold:`, error);
     }
   });
 

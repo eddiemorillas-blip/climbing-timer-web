@@ -71,7 +71,7 @@
     /* Climber Grid - Dynamic Scaling */
     .climber-grid {
       display: grid;
-      grid-template-columns: repeat(4, 1fr);
+      /* Columns set dynamically via JavaScript based on active boulders */
       gap: 0.5rem;
       margin-bottom: 2rem;
       width: 100%;
@@ -104,6 +104,29 @@
     .climber-count {
       font-size: 0.7rem;
       color: rgba(255, 255, 255, 0.5);
+    }
+
+    /* Hold state styling */
+    .climber-cell-held {
+      background: rgba(255, 165, 0, 0.15);
+      border-color: rgba(255, 165, 0, 0.4);
+    }
+    .climber-cell-held .climber-name {
+      color: #ffa500;
+      font-style: italic;
+    }
+    .climber-cell-held .climber-count {
+      color: rgba(255, 165, 0, 0.7);
+    }
+
+    /* Boulder hold button styling */
+    .boulder-hold-btn {
+      transition: all 0.15s ease;
+    }
+    .boulder-hold-btn.held {
+      background-color: rgba(255, 165, 0, 0.3) !important;
+      border-color: #ffa500 !important;
+      color: #ffa500 !important;
     }
 
     /* Dynamic font sizing based on number of categories */
@@ -547,8 +570,18 @@
               placeholder="Sarah Johnson&#10;Emily Chen&#10;Maria Garcia">${(category.boulders[0]?.climbers || []).join('\n')}</textarea>
             <button class="import-climbers-btn mt-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold" data-category-id="${category.id}">Import Climbers</button>
           </div>
-          <div class="text-sm text-gray-400">
+          <div class="text-sm text-gray-400 mb-3">
             ${category.boulders[0]?.climbers?.length || 0} climbers imported
+          </div>
+          <div class="pt-3 border-t border-gray-600">
+            <label class="block text-sm text-gray-400 mb-2">Boulder Hold Status</label>
+            <div class="flex gap-2">
+              ${[1, 2, 3, 4].map(boulderId => {
+                const boulder = category.boulders.find(b => b.boulderId === boulderId);
+                const isHeld = boulder?.held === true;
+                return `<button class="boulder-hold-btn flex-1 px-3 py-2 rounded-lg text-xs font-semibold border border-gray-600 ${isHeld ? 'held' : 'bg-gray-700 text-white hover:bg-gray-600'}" data-category-id="${category.id}" data-boulder-id="${boulderId}">B${boulderId}${isHeld ? ' (HOLD)' : ''}</button>`;
+              }).join('')}
+            </div>
           </div>
         </div>
       `).join('');
@@ -582,15 +615,24 @@
 
           const category = state.categories.find(c => c.id === categoryId);
           if (category) {
-            // Update all 4 boulders with the same climber list
+            // Update all 4 boulders with the same climber list, preserving held state
             category.boulders = [
-              { boulderId: 1, climbers: [...climbers], currentClimberIndex: 0 },
-              { boulderId: 2, climbers: [...climbers], currentClimberIndex: 0 },
-              { boulderId: 3, climbers: [...climbers], currentClimberIndex: 0 },
-              { boulderId: 4, climbers: [...climbers], currentClimberIndex: 0 }
+              { boulderId: 1, climbers: [...climbers], currentClimberIndex: 0, held: category.boulders[0]?.held || false },
+              { boulderId: 2, climbers: [...climbers], currentClimberIndex: 0, held: category.boulders[1]?.held || false },
+              { boulderId: 3, climbers: [...climbers], currentClimberIndex: 0, held: category.boulders[2]?.held || false },
+              { boulderId: 4, climbers: [...climbers], currentClimberIndex: 0, held: category.boulders[3]?.held || false }
             ];
             socket.emit('category-update', category);
           }
+        });
+      });
+
+      // Wire up boulder hold toggle buttons
+      document.querySelectorAll('.boulder-hold-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          const categoryId = parseInt(e.target.dataset.categoryId);
+          const boulderId = parseInt(e.target.dataset.boulderId);
+          socket.emit('toggle-boulder-hold', { categoryId, boulderId });
         });
       });
     }
@@ -605,28 +647,49 @@
         return;
       }
 
+      // Find which boulders have climbers across ANY category
+      const activeBoulderIds = new Set();
+      state.categories.forEach(category => {
+        category.boulders.forEach(boulder => {
+          if (boulder.climbers && boulder.climbers.length > 0) {
+            activeBoulderIds.add(boulder.boulderId);
+          }
+        });
+      });
+
+      if (activeBoulderIds.size === 0) {
+        grid.style.display = 'none';
+        controlsDiv.style.display = 'none';
+        return;
+      }
+
       grid.style.display = 'grid';
       controlsDiv.style.display = 'flex';
       grid.setAttribute('data-categories', state.categories.length);
 
+      // Set dynamic column count based on active boulders
+      const sortedBoulderIds = [...activeBoulderIds].sort((a, b) => a - b);
+      grid.style.gridTemplateColumns = `repeat(${sortedBoulderIds.length}, 1fr)`;
+
       let html = '';
 
-      // Create 4×categories grid (4 boulders × N categories)
+      // Create grid with only active boulders × N categories
       for (let categoryIndex = 0; categoryIndex < state.categories.length; categoryIndex++) {
         const category = state.categories[categoryIndex];
 
-        for (let boulderIndex = 0; boulderIndex < 4; boulderIndex++) {
-          const boulder = category.boulders[boulderIndex];
-          const climber = boulder?.climbers?.[boulder.currentClimberIndex];
+        for (const boulderId of sortedBoulderIds) {
+          const boulder = category.boulders.find(b => b.boulderId === boulderId);
+          const isHeld = boulder?.held === true;
+          const climber = boulder?.climbers?.[boulder?.currentClimberIndex || 0];
           const climberCount = boulder?.climbers?.length || 0;
           const currentIndex = boulder?.currentClimberIndex || 0;
 
           html += `
-            <div class="climber-cell">
-              <div class="boulder-header">Boulder ${boulderIndex + 1}</div>
+            <div class="climber-cell ${isHeld ? 'climber-cell-held' : ''}">
+              <div class="boulder-header">Boulder ${boulderId}</div>
               <div class="category-name">${category.name}</div>
-              <div class="climber-name">${climber || '—'}</div>
-              <div class="climber-count">${climberCount > 0 ? `${currentIndex + 1}/${climberCount}` : 'No climbers'}</div>
+              <div class="climber-name">${isHeld ? 'HOLD' : (climber || '—')}</div>
+              <div class="climber-count">${isHeld ? 'On Hold' : (climberCount > 0 ? `${currentIndex + 1}/${climberCount}` : 'No climbers')}</div>
             </div>
           `;
         }
@@ -646,10 +709,10 @@
         id: newId,
         name: `Category ${newId}`,
         boulders: [
-          { boulderId: 1, climbers: [], currentClimberIndex: 0 },
-          { boulderId: 2, climbers: [], currentClimberIndex: 0 },
-          { boulderId: 3, climbers: [], currentClimberIndex: 0 },
-          { boulderId: 4, climbers: [], currentClimberIndex: 0 }
+          { boulderId: 1, climbers: [], currentClimberIndex: 0, held: false },
+          { boulderId: 2, climbers: [], currentClimberIndex: 0, held: false },
+          { boulderId: 3, climbers: [], currentClimberIndex: 0, held: false },
+          { boulderId: 4, climbers: [], currentClimberIndex: 0, held: false }
         ]
       };
 

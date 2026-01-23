@@ -104,15 +104,6 @@
     .climber-grid[data-categories="3"] .climber-name { font-size: 3.5vh; }
     .climber-grid[data-categories="4"] .climber-name { font-size: 2.5vh; }
 
-    /* Hold state styling */
-    .climber-cell-held {
-      background: rgba(255, 165, 0, 0.15);
-      border-color: rgba(255, 165, 0, 0.5);
-    }
-    .climber-cell-held .climber-name {
-      color: #ffa500;
-    }
-
     /* Empty cell styling */
     .climber-cell-empty {
       background: rgba(255, 255, 255, 0.02);
@@ -310,19 +301,19 @@
 
         for (const boulderId of sortedBoulderIds) {
           const boulder = category.boulders.find(b => b.boulderId === boulderId);
-          const isHeld = boulder?.held === true;
+          const isSkipped = boulder?.skipNext === true;
           const hasStarted = boulder?.hasStarted === true;
-          const climber = hasStarted ? boulder?.climbers?.[boulder?.currentClimberIndex || 0] : null;
+          const climber = hasStarted && !isSkipped ? boulder?.climbers?.[boulder?.currentClimberIndex || 0] : null;
           const climberCount = boulder?.climbers?.length || 0;
 
           const allDone = activeCount === 0 && climberCount > 0;
-          const isEmpty = !isHeld && !climber && !allDone;
+          const isEmpty = !climber && !allDone;
 
           html += `
-            <div class="climber-cell ${isHeld ? 'climber-cell-held' : ''} ${isEmpty ? 'climber-cell-empty' : ''}">
+            <div class="climber-cell ${isEmpty ? 'climber-cell-empty' : ''}">
               <div class="boulder-header">Boulder ${boulderId}</div>
               <div class="category-name">${category.name}</div>
-              <div class="climber-name">${isHeld ? 'HOLD' : (allDone ? 'DONE' : (climber || '—'))}</div>
+              <div class="climber-name">${allDone ? 'DONE' : (climber || '—')}</div>
             </div>
           `;
         }

@@ -81,14 +81,13 @@
       color: rgba(255, 255, 255, 0.3);
     }
 
-    /* Boulder hold button styling */
-    .boulder-hold-btn {
+    /* Boulder skip button styling */
+    .boulder-skip-btn {
       transition: all 0.15s ease;
     }
-    .boulder-hold-btn.held {
-      background-color: rgba(255, 165, 0, 0.3) !important;
-      border-color: #ffa500 !important;
-      color: #ffa500 !important;
+    .boulder-skip-btn:hover {
+      background-color: rgba(239, 68, 68, 0.3) !important;
+      border-color: #ef4444 !important;
     }
 
     /* Collapsible category styling */
@@ -538,11 +537,9 @@
               <span class="font-semibold text-sm">${category.name}</span>
               <span class="text-xs text-gray-500">(${totalClimbers}${completedCount > 0 ? `, ${completedCount} done` : ''})</span>
             </div>
-            <div class="flex gap-1">
+            <div class="flex gap-1" title="Skip climber on boulder">
               ${[1, 2, 3, 4].map(boulderId => {
-                const boulder = category.boulders.find(b => b.boulderId === boulderId);
-                const isHeld = boulder?.held === true;
-                return `<button class="boulder-hold-btn px-2 py-1 rounded text-xs font-semibold border border-gray-600 ${isHeld ? 'held' : 'bg-gray-700 text-white hover:bg-gray-600'}" data-category-id="${category.id}" data-boulder-id="${boulderId}">B${boulderId}</button>`;
+                return `<button class="boulder-skip-btn px-2 py-1 rounded text-xs font-semibold border border-gray-600 bg-gray-700 text-white hover:bg-gray-600" data-category-id="${category.id}" data-boulder-id="${boulderId}">B${boulderId}</button>`;
               }).join('')}
             </div>
           </div>
@@ -611,10 +608,10 @@
           if (category) {
             // All boulders start at index 0 - climbers progress B1 -> B2 -> B3 -> B4
             category.boulders = [
-              { boulderId: 1, climbers: [...climbers], currentClimberIndex: 0, held: category.boulders[0]?.held || false, hasStarted: false },
-              { boulderId: 2, climbers: [...climbers], currentClimberIndex: 0, held: category.boulders[1]?.held || false, hasStarted: false },
-              { boulderId: 3, climbers: [...climbers], currentClimberIndex: 0, held: category.boulders[2]?.held || false, hasStarted: false },
-              { boulderId: 4, climbers: [...climbers], currentClimberIndex: 0, held: category.boulders[3]?.held || false, hasStarted: false }
+              { boulderId: 1, climbers: [...climbers], currentClimberIndex: 0, skipNext: false, hasStarted: false },
+              { boulderId: 2, climbers: [...climbers], currentClimberIndex: 0, skipNext: false, hasStarted: false },
+              { boulderId: 3, climbers: [...climbers], currentClimberIndex: 0, skipNext: false, hasStarted: false },
+              { boulderId: 4, climbers: [...climbers], currentClimberIndex: 0, skipNext: false, hasStarted: false }
             ];
             category.climberProgress = {};
             socket.emit('category-update', category);
@@ -622,12 +619,12 @@
         });
       });
 
-      // Wire up boulder hold toggle buttons
-      document.querySelectorAll('.boulder-hold-btn').forEach(btn => {
+      // Wire up boulder skip buttons (skip current climber, insert empty that flows through)
+      document.querySelectorAll('.boulder-skip-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
           const categoryId = parseInt(e.target.dataset.categoryId);
           const boulderId = parseInt(e.target.dataset.boulderId);
-          socket.emit('toggle-boulder-hold', { categoryId, boulderId });
+          socket.emit('skip-boulder-climber', { categoryId, boulderId });
         });
       });
 
@@ -762,10 +759,10 @@
         id: newId,
         name: `Category ${newId}`,
         boulders: [
-          { boulderId: 1, climbers: [], currentClimberIndex: 0, held: false, hasStarted: false },
-          { boulderId: 2, climbers: [], currentClimberIndex: 0, held: false, hasStarted: false },
-          { boulderId: 3, climbers: [], currentClimberIndex: 0, held: false, hasStarted: false },
-          { boulderId: 4, climbers: [], currentClimberIndex: 0, held: false, hasStarted: false }
+          { boulderId: 1, climbers: [], currentClimberIndex: 0, skipNext: false, hasStarted: false },
+          { boulderId: 2, climbers: [], currentClimberIndex: 0, skipNext: false, hasStarted: false },
+          { boulderId: 3, climbers: [], currentClimberIndex: 0, skipNext: false, hasStarted: false },
+          { boulderId: 4, climbers: [], currentClimberIndex: 0, skipNext: false, hasStarted: false }
         ],
         climberProgress: {}
       };

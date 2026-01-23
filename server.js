@@ -141,10 +141,10 @@ app.post('/api/import-excel', upload.single('excel'), (req, res) => {
         id: maxId + colIndex + 1,
         name: String(categoryName).trim(),
         boulders: [
-          { boulderId: 1, climbers: [...climbers], currentClimberIndex: 0, held: false, hasStarted: false },
-          { boulderId: 2, climbers: [...climbers], currentClimberIndex: 0, held: false, hasStarted: false },
-          { boulderId: 3, climbers: [...climbers], currentClimberIndex: 0, held: false, hasStarted: false },
-          { boulderId: 4, climbers: [...climbers], currentClimberIndex: 0, held: false, hasStarted: false }
+          { boulderId: 1, climbers: [...climbers], currentClimberIndex: 0, skipNext: false, hasStarted: false },
+          { boulderId: 2, climbers: [...climbers], currentClimberIndex: 0, skipNext: false, hasStarted: false },
+          { boulderId: 3, climbers: [...climbers], currentClimberIndex: 0, skipNext: false, hasStarted: false },
+          { boulderId: 4, climbers: [...climbers], currentClimberIndex: 0, skipNext: false, hasStarted: false }
         ],
         climberProgress: {}
       };
@@ -276,14 +276,26 @@ function canBoulderStart(category, boulderIndex) {
 
 // Advance a single boulder, recording progress and skipping completed climbers
 // boulderIndex is optional - if provided, checks cascading start rules
+// Returns true if this boulder had a skip that should flow to next boulder
 function advanceBoulder(boulder, category, boulderIndex = null) {
-  if (boulder.held || !boulder.climbers || boulder.climbers.length === 0) return;
+  if (!boulder.climbers || boulder.climbers.length === 0) return false;
+
+  // Check if this boulder has a pending skip (empty slot flowing through)
+  if (boulder.skipNext) {
+    boulder.skipNext = false;
+    // Pass skip to next boulder if it exists
+    if (boulderIndex !== null && boulderIndex < category.boulders.length - 1) {
+      category.boulders[boulderIndex + 1].skipNext = true;
+    }
+    // Don't advance climber index - no one climbed, just showing empty
+    return true;
+  }
 
   // If boulder hasn't started yet, check if it can start
   if (!boulder.hasStarted) {
     // If boulderIndex provided, check cascading rules
     if (boulderIndex !== null && !canBoulderStart(category, boulderIndex)) {
-      return; // Can't start yet - previous boulder hasn't advanced
+      return false; // Can't start yet - previous boulder hasn't advanced
     }
 
     boulder.hasStarted = true;
@@ -292,7 +304,7 @@ function advanceBoulder(boulder, category, boulderIndex = null) {
     if (firstClimber) {
       recordClimberProgress(category, firstClimber, boulder.boulderId);
     }
-    return;
+    return false;
   }
 
   // Record that current climber has climbed this boulder
@@ -304,6 +316,7 @@ function advanceBoulder(boulder, category, boulderIndex = null) {
   // Find next active (non-completed) climber
   const nextIndex = (boulder.currentClimberIndex + 1) % boulder.climbers.length;
   boulder.currentClimberIndex = getNextActiveClimberIndex(boulder, category, nextIndex);
+  return false;
 }
 
 // Auto-advance all non-held climbers (called when climb phase ends)
@@ -545,22 +558,31 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Listen for boulder hold toggle
-  socket.on('toggle-boulder-hold', (data) => {
+  // Listen for skip climber on boulder (inserts empty that flows through remaining boulders)
+  socket.on('skip-boulder-climber', (data) => {
     try {
       const { categoryId, boulderId } = data;
       const category = timerState.categories.find(c => c.id === categoryId);
       if (category) {
-        const boulder = category.boulders.find(b => b.boulderId === boulderId);
-        if (boulder) {
-          boulder.held = !boulder.held;
-          console.log(`[${new Date().toISOString()}] Boulder ${boulderId} in ${category.name} ${boulder.held ? 'held' : 'released'} by ${clientId}`);
+        const boulderIndex = category.boulders.findIndex(b => b.boulderId === boulderId);
+        const boulder = category.boulders[boulderIndex];
+        if (boulder && boulder.hasStarted) {
+          // Advance this boulder (skip current climber - they'll come back around)
+          const nextIndex = (boulder.currentClimberIndex + 1) % boulder.climbers.length;
+          boulder.currentClimberIndex = getNextActiveClimberIndex(boulder, category, nextIndex);
+
+          // Set next boulder to show empty (the skip flows through)
+          if (boulderIndex < category.boulders.length - 1) {
+            category.boulders[boulderIndex + 1].skipNext = true;
+          }
+
+          console.log(`[${new Date().toISOString()}] Skipped climber on Boulder ${boulderId} in ${category.name} by ${clientId}`);
           io.emit('categories-sync', timerState.categories);
           saveCategories();
         }
       }
     } catch (error) {
-      console.error(`[${new Date().toISOString()}] Error toggling boulder hold:`, error);
+      console.error(`[${new Date().toISOString()}] Error skipping boulder climber:`, error);
     }
   });
 
@@ -571,10 +593,11 @@ io.on('connection', (socket) => {
       if (category) {
         // Reset climber progress tracking
         category.climberProgress = {};
-        // Reset all boulder indices to 0 and hasStarted to false
+        // Reset all boulder indices to 0, hasStarted to false, clear skips
         category.boulders.forEach((boulder) => {
           boulder.currentClimberIndex = 0;
           boulder.hasStarted = false;
+          boulder.skipNext = false;
         });
         console.log(`[${new Date().toISOString()}] Category progress reset by ${clientId}: ${category.name}`);
         io.emit('categories-sync', timerState.categories);

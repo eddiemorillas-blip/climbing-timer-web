@@ -82,16 +82,11 @@
       overflow: hidden;
       min-height: 0;
     }
-    .boulder-header {
-      font-size: 1.2vh;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      color: rgba(255, 255, 255, 0.5);
-    }
-    .category-name {
+    .cell-header {
       font-size: 1.5vh;
-      color: rgba(255, 255, 255, 0.7);
+      font-weight: 600;
+      color: rgba(255, 255, 255, 0.6);
+      white-space: nowrap;
     }
     .climber-name {
       font-weight: 700;
@@ -311,8 +306,7 @@
 
           html += `
             <div class="climber-cell ${isEmpty ? 'climber-cell-empty' : ''}">
-              <div class="boulder-header">Boulder ${boulderId}</div>
-              <div class="category-name">${category.name}</div>
+              <div class="cell-header">B${boulderId} · ${category.name}</div>
               <div class="climber-name">${allDone ? 'DONE' : (climber || '—')}</div>
             </div>
           `;

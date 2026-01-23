@@ -25,6 +25,7 @@
     /* Timer section - 70% */
     .timer-section {
       flex: 7;
+      min-height: 0;
       display: flex;
       flex-direction: column;
       align-items: center;
@@ -34,10 +35,12 @@
     /* Climber section - 30% */
     .climber-section {
       flex: 3;
+      min-height: 0;
       background: #111;
-      padding: 1vw;
+      padding: 0.5vh 0.5vw;
       display: flex;
-      align-items: center;
+      align-items: stretch;
+      overflow: hidden;
     }
     .tabular-nums { font-variant-numeric: tabular-nums; }
 
@@ -62,44 +65,44 @@
     /* Climber Grid */
     .climber-grid {
       display: grid;
-      gap: 1vw;
+      gap: 0.5vh;
       width: 100%;
       height: 100%;
     }
     .climber-cell {
       background: rgba(255, 255, 255, 0.05);
-      border: 2px solid rgba(255, 255, 255, 0.2);
-      border-radius: 1vw;
-      padding: 1vw;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 0.5vh;
+      padding: 0.3vh 0.5vw;
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
       text-align: center;
+      overflow: hidden;
+      min-height: 0;
     }
     .boulder-header {
-      font-size: 1.5vw;
+      font-size: 1.2vh;
       font-weight: 600;
       text-transform: uppercase;
-      letter-spacing: 0.1em;
+      letter-spacing: 0.05em;
       color: rgba(255, 255, 255, 0.5);
-      margin-bottom: 0.3vw;
     }
     .category-name {
-      font-size: 1.8vw;
+      font-size: 1.5vh;
       color: rgba(255, 255, 255, 0.7);
-      margin-bottom: 0.5vw;
     }
     .climber-name {
       font-weight: 700;
-      line-height: 1.1;
+      line-height: 1;
     }
 
     /* Dynamic font sizing based on number of categories */
-    .climber-grid[data-categories="1"] .climber-name { font-size: 4vw; }
-    .climber-grid[data-categories="2"] .climber-name { font-size: 3vw; }
-    .climber-grid[data-categories="3"] .climber-name { font-size: 2.5vw; }
-    .climber-grid[data-categories="4"] .climber-name { font-size: 2vw; }
+    .climber-grid[data-categories="1"] .climber-name { font-size: 8vh; }
+    .climber-grid[data-categories="2"] .climber-name { font-size: 5vh; }
+    .climber-grid[data-categories="3"] .climber-name { font-size: 3.5vh; }
+    .climber-grid[data-categories="4"] .climber-name { font-size: 2.5vh; }
 
     /* Hold state styling */
     .climber-cell-held {
@@ -117,7 +120,6 @@
     }
     .climber-cell-empty .climber-name {
       color: rgba(255, 255, 255, 0.2);
-      font-size: 3vw !important;
     }
 
     /* Fullscreen button */

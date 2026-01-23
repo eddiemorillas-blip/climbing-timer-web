@@ -263,12 +263,27 @@ function getNextActiveClimberIndex(boulder, category, startIndex) {
   return startIndex;
 }
 
+// Check if a boulder can start (previous boulder must have advanced at least once)
+function canBoulderStart(category, boulderIndex) {
+  if (boulderIndex === 0) return true; // B1 can always start
+
+  const prevBoulder = category.boulders[boulderIndex - 1];
+  // Previous boulder must be started AND have advanced at least once
+  return prevBoulder && prevBoulder.hasStarted && prevBoulder.currentClimberIndex > 0;
+}
+
 // Advance a single boulder, recording progress and skipping completed climbers
-function advanceBoulder(boulder, category) {
+// boulderIndex is optional - if provided, checks cascading start rules
+function advanceBoulder(boulder, category, boulderIndex = null) {
   if (boulder.held || !boulder.climbers || boulder.climbers.length === 0) return;
 
-  // If boulder hasn't started yet, just mark it as started (first climber becomes active)
+  // If boulder hasn't started yet, check if it can start
   if (!boulder.hasStarted) {
+    // If boulderIndex provided, check cascading rules
+    if (boulderIndex !== null && !canBoulderStart(category, boulderIndex)) {
+      return; // Can't start yet - previous boulder hasn't advanced
+    }
+
     boulder.hasStarted = true;
     // Record that first climber is now on this boulder
     const firstClimber = boulder.climbers[boulder.currentClimberIndex];
@@ -290,11 +305,12 @@ function advanceBoulder(boulder, category) {
 }
 
 // Auto-advance all non-held climbers (called when climb phase ends)
+// Process boulders in order (B1 first) to correctly handle cascading starts
 function advanceNonHeldClimbers() {
   timerState.categories.forEach(category => {
-    category.boulders.forEach(boulder => {
-      advanceBoulder(boulder, category);
-    });
+    for (let i = 0; i < category.boulders.length; i++) {
+      advanceBoulder(category.boulders[i], category, i);
+    }
   });
   console.log(`[${new Date().toISOString()}] Auto-advanced all non-held climbers`);
 }
@@ -460,9 +476,10 @@ io.on('connection', (socket) => {
       const category = timerState.categories.find(c => c.id === categoryId);
 
       if (category) {
-        const boulder = category.boulders.find(b => b.boulderId === boulderId);
+        const boulderIndex = category.boulders.findIndex(b => b.boulderId === boulderId);
+        const boulder = category.boulders[boulderIndex];
         if (boulder && boulder.climbers.length > 0) {
-          advanceBoulder(boulder, category);
+          advanceBoulder(boulder, category, boulderIndex);
           console.log(`[${new Date().toISOString()}] Climber advanced by ${clientId}: ${category.name} - Boulder ${boulderId}`);
           io.emit('categories-sync', timerState.categories);
           saveCategories();
@@ -477,9 +494,10 @@ io.on('connection', (socket) => {
   socket.on('advance-boulder', (boulderId) => {
     try {
       timerState.categories.forEach(category => {
-        const boulder = category.boulders.find(b => b.boulderId === boulderId);
+        const boulderIndex = category.boulders.findIndex(b => b.boulderId === boulderId);
+        const boulder = category.boulders[boulderIndex];
         if (boulder) {
-          advanceBoulder(boulder, category);
+          advanceBoulder(boulder, category, boulderIndex);
         }
       });
       console.log(`[${new Date().toISOString()}] All climbers advanced on Boulder ${boulderId} by ${clientId}`);
@@ -495,9 +513,10 @@ io.on('connection', (socket) => {
     try {
       const category = timerState.categories.find(c => c.id === categoryId);
       if (category) {
-        category.boulders.forEach(boulder => {
-          advanceBoulder(boulder, category);
-        });
+        // Process boulders in order to correctly handle cascading starts
+        for (let i = 0; i < category.boulders.length; i++) {
+          advanceBoulder(category.boulders[i], category, i);
+        }
         console.log(`[${new Date().toISOString()}] All climbers advanced in category ${category.name} by ${clientId}`);
         io.emit('categories-sync', timerState.categories);
         saveCategories();
@@ -511,9 +530,10 @@ io.on('connection', (socket) => {
   socket.on('advance-all-climbers', () => {
     try {
       timerState.categories.forEach(category => {
-        category.boulders.forEach(boulder => {
-          advanceBoulder(boulder, category);
-        });
+        // Process boulders in order to correctly handle cascading starts
+        for (let i = 0; i < category.boulders.length; i++) {
+          advanceBoulder(category.boulders[i], category, i);
+        }
       });
       console.log(`[${new Date().toISOString()}] All climbers advanced by ${clientId}`);
       io.emit('categories-sync', timerState.categories);

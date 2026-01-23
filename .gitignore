@@ -1,6 +1,9 @@
 # Node modules
 node_modules/
 
+# Data persistence (categories saved to JSON)
+data/
+
 # Logs
 logs
 *.log

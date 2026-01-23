@@ -129,6 +129,18 @@
       color: #ffa500 !important;
     }
 
+    /* Completed climber state styling */
+    .climber-cell-done {
+      background: rgba(34, 197, 94, 0.15);
+      border-color: rgba(34, 197, 94, 0.4);
+    }
+    .climber-cell-done .climber-name {
+      color: #22c55e;
+    }
+    .climber-cell-done .climber-count {
+      color: rgba(34, 197, 94, 0.7);
+    }
+
     /* Dynamic font sizing based on number of categories */
     .climber-grid[data-categories="1"] .climber-name { font-size: 2rem; }
     .climber-grid[data-categories="2"] .climber-name { font-size: 1.5rem; }
@@ -200,7 +212,13 @@
     <div class="bg-gray-900 rounded-2xl shadow p-4 mb-6">
       <div class="flex items-center justify-between mb-3">
         <h2 class="font-semibold text-lg">Categories & Climbers</h2>
-        <button id="addCategoryBtn" class="px-4 py-2 rounded-xl bg-green-600 hover:bg-green-700 text-white text-sm font-semibold" title="Add Category (Max 4)">+ Add Category</button>
+        <div class="flex gap-2">
+          <label class="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-sm font-semibold cursor-pointer" title="Import from Excel">
+            Import Excel
+            <input type="file" id="excelFileInput" accept=".xlsx,.xls" class="hidden" />
+          </label>
+          <button id="addCategoryBtn" class="px-4 py-2 rounded-xl bg-green-600 hover:bg-green-700 text-white text-sm font-semibold" title="Add Category (Max 4)">+ Add Category</button>
+        </div>
       </div>
       <div id="categoriesList" class="space-y-3">
         <p class="text-sm text-gray-400">No categories yet. Click "Add Category" to get started.</p>
@@ -233,6 +251,10 @@
         <button id="nextBoulder2Btn" class="control-btn px-3 py-2 rounded-xl bg-white bg-opacity-10 text-white text-xs font-semibold hover:bg-opacity-20 border border-white">Next B2</button>
         <button id="nextBoulder3Btn" class="control-btn px-3 py-2 rounded-xl bg-white bg-opacity-10 text-white text-xs font-semibold hover:bg-opacity-20 border border-white">Next B3</button>
         <button id="nextBoulder4Btn" class="control-btn px-3 py-2 rounded-xl bg-white bg-opacity-10 text-white text-xs font-semibold hover:bg-opacity-20 border border-white">Next B4</button>
+      </div>
+      <!-- Per-Category Advancement Buttons -->
+      <div id="categoryAdvanceButtons" class="controls flex flex-wrap items-center justify-center gap-2 mt-2" style="display: none;">
+        <!-- Dynamically populated per-category buttons -->
       </div>
 
   <p class="hint text-xs text-gray-300 mt-4">Tones: 1 beep at 1:00 left (climb), short beeps at 5..4..3..2..1, and a distinct buzzer at the end of climb. Move mouse to show controls in fullscreen.</p>
@@ -384,6 +406,26 @@
     const totalClimb = () => clamp(state.climbMin,0,999)*60 + clamp(state.climbSec,0,59);
     const totalTrans = () => clamp(state.transMin,0,999)*60 + clamp(state.transSec,0,59);
     const fmt = (s) => { s = Math.max(0, Math.floor(s)); const m = Math.floor(s/60), r = s%60; return String(m).padStart(2,'0') + ':' + String(r).padStart(2,'0'); };
+
+    // --- Completion Tracking Helpers ---
+    function isClimberCompleted(category, climberName) {
+      const progress = category.climberProgress?.[climberName] || [];
+      return progress.length >= 4 && [1, 2, 3, 4].every(b => progress.includes(b));
+    }
+
+    function getActiveClimberCount(category) {
+      const climbers = category.boulders[0]?.climbers || [];
+      return climbers.filter(name => !isClimberCompleted(category, name)).length;
+    }
+
+    function getCompletedClimberCount(category) {
+      const climbers = category.boulders[0]?.climbers || [];
+      return climbers.filter(name => isClimberCompleted(category, name)).length;
+    }
+
+    function getClimberProgress(category, climberName) {
+      return category.climberProgress?.[climberName] || [];
+    }
 
     function updateDisplay(){
       document.getElementById('timeDisplay').textContent = fmt(state.remaining);
@@ -549,7 +591,12 @@
         return;
       }
 
-      container.innerHTML = state.categories.map(category => `
+      container.innerHTML = state.categories.map(category => {
+        const totalClimbers = category.boulders[0]?.climbers?.length || 0;
+        const completedCount = getCompletedClimberCount(category);
+        const activeCount = getActiveClimberCount(category);
+
+        return `
         <div class="bg-gray-800 rounded-xl p-4 border border-gray-700">
           <div class="flex items-start justify-between mb-3">
             <div class="flex-1">
@@ -570,8 +617,9 @@
               placeholder="Sarah Johnson&#10;Emily Chen&#10;Maria Garcia">${(category.boulders[0]?.climbers || []).join('\n')}</textarea>
             <button class="import-climbers-btn mt-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold" data-category-id="${category.id}">Import Climbers</button>
           </div>
-          <div class="text-sm text-gray-400 mb-3">
-            ${category.boulders[0]?.climbers?.length || 0} climbers imported
+          <div class="flex items-center justify-between text-sm text-gray-400 mb-3">
+            <span>${totalClimbers} climbers imported${completedCount > 0 ? ` (${activeCount} active, ${completedCount} done)` : ''}</span>
+            ${totalClimbers > 0 ? `<button class="reset-progress-btn px-3 py-1 rounded-lg bg-yellow-600 hover:bg-yellow-700 text-white text-xs font-semibold" data-category-id="${category.id}">Reset Progress</button>` : ''}
           </div>
           <div class="pt-3 border-t border-gray-600">
             <label class="block text-sm text-gray-400 mb-2">Boulder Hold Status</label>
@@ -584,7 +632,7 @@
             </div>
           </div>
         </div>
-      `).join('');
+      `}).join('');
 
       // Wire up event listeners
       document.querySelectorAll('.category-name-input').forEach(input => {
@@ -635,15 +683,28 @@
           socket.emit('toggle-boulder-hold', { categoryId, boulderId });
         });
       });
+
+      // Wire up reset progress buttons
+      document.querySelectorAll('.reset-progress-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          const categoryId = parseInt(e.target.dataset.categoryId);
+          const category = state.categories.find(c => c.id === categoryId);
+          if (category && confirm(`Reset progress for all climbers in "${category.name}"? This will clear completion tracking and reset to the first climber.`)) {
+            socket.emit('reset-category-progress', categoryId);
+          }
+        });
+      });
     }
 
     function renderClimberGrid() {
       const grid = document.getElementById('climberGrid');
       const controlsDiv = document.getElementById('climberControls');
+      const categoryButtonsDiv = document.getElementById('categoryAdvanceButtons');
 
       if (state.categories.length === 0) {
         grid.style.display = 'none';
         controlsDiv.style.display = 'none';
+        categoryButtonsDiv.style.display = 'none';
         return;
       }
 
@@ -660,6 +721,7 @@
       if (activeBoulderIds.size === 0) {
         grid.style.display = 'none';
         controlsDiv.style.display = 'none';
+        categoryButtonsDiv.style.display = 'none';
         return;
       }
 
@@ -676,6 +738,8 @@
       // Create grid with only active boulders × N categories
       for (let categoryIndex = 0; categoryIndex < state.categories.length; categoryIndex++) {
         const category = state.categories[categoryIndex];
+        const activeCount = getActiveClimberCount(category);
+        const completedCount = getCompletedClimberCount(category);
 
         for (const boulderId of sortedBoulderIds) {
           const boulder = category.boulders.find(b => b.boulderId === boulderId);
@@ -684,18 +748,65 @@
           const climberCount = boulder?.climbers?.length || 0;
           const currentIndex = boulder?.currentClimberIndex || 0;
 
+          // Check if current climber is completed (showing all 4 boulders done)
+          const isClimberDone = climber && isClimberCompleted(category, climber);
+          const climberProgress = climber ? getClimberProgress(category, climber) : [];
+          const progressText = climberProgress.length > 0 ? ` (${climberProgress.length}/4)` : '';
+
+          // Show "ALL DONE" if all climbers completed
+          const allDone = activeCount === 0 && climberCount > 0;
+
           html += `
-            <div class="climber-cell ${isHeld ? 'climber-cell-held' : ''}">
+            <div class="climber-cell ${isHeld ? 'climber-cell-held' : ''} ${isClimberDone ? 'climber-cell-done' : ''}">
               <div class="boulder-header">Boulder ${boulderId}</div>
               <div class="category-name">${category.name}</div>
-              <div class="climber-name">${isHeld ? 'HOLD' : (climber || '—')}</div>
-              <div class="climber-count">${isHeld ? 'On Hold' : (climberCount > 0 ? `${currentIndex + 1}/${climberCount}` : 'No climbers')}</div>
+              <div class="climber-name">${isHeld ? 'HOLD' : (allDone ? 'ALL DONE' : (climber || '—'))}</div>
+              <div class="climber-count">${isHeld ? 'On Hold' : (allDone ? `${completedCount} completed` : (climberCount > 0 ? `${activeCount} active${progressText}` : 'No climbers'))}</div>
             </div>
           `;
         }
       }
 
       grid.innerHTML = html;
+
+      // Render per-category advancement buttons
+      renderCategoryAdvanceButtons();
+    }
+
+    function renderCategoryAdvanceButtons() {
+      const categoryButtonsDiv = document.getElementById('categoryAdvanceButtons');
+
+      // Only show if we have categories with climbers
+      const hasClimbers = state.categories.some(c => c.boulders[0]?.climbers?.length > 0);
+      if (!hasClimbers || state.categories.length === 0) {
+        categoryButtonsDiv.style.display = 'none';
+        return;
+      }
+
+      categoryButtonsDiv.style.display = 'flex';
+
+      const buttonHtml = state.categories
+        .filter(c => c.boulders[0]?.climbers?.length > 0)
+        .map(category => {
+          const activeCount = getActiveClimberCount(category);
+          const allDone = activeCount === 0;
+          return `<button
+            class="category-advance-btn control-btn px-3 py-2 rounded-xl text-xs font-semibold ${allDone ? 'bg-gray-600 text-gray-400' : 'bg-green-600 hover:bg-green-700 text-white'}"
+            data-category-id="${category.id}"
+            ${allDone ? 'disabled' : ''}>
+            Next ${category.name}
+          </button>`;
+        }).join('');
+
+      categoryButtonsDiv.innerHTML = buttonHtml;
+
+      // Wire up event listeners
+      document.querySelectorAll('.category-advance-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          const categoryId = parseInt(e.target.dataset.categoryId);
+          socket.emit('advance-category', categoryId);
+        });
+      });
     }
 
     function addCategory() {
@@ -843,6 +954,37 @@
 
     document.getElementById('nextBoulder4Btn').addEventListener('click', () => {
       socket.emit('advance-boulder', 4);
+    });
+
+    // --- Excel Import Handler ---
+    document.getElementById('excelFileInput').addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      const formData = new FormData();
+      formData.append('excel', file);
+
+      try {
+        const response = await fetch('/api/import-excel', {
+          method: 'POST',
+          body: formData
+        });
+
+        if (!response.ok) {
+          const error = await response.json();
+          alert(`Import failed: ${error.error || 'Unknown error'}`);
+          return;
+        }
+
+        const result = await response.json();
+        alert(`Successfully imported ${result.categoriesCreated} categories with ${result.totalClimbers} total climbers.`);
+      } catch (error) {
+        console.error('Import error:', error);
+        alert('Failed to import Excel file. Please check the file format.');
+      }
+
+      // Clear the file input
+      e.target.value = '';
     });
 
     // Init

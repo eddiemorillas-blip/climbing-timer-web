@@ -609,14 +609,12 @@
 
           const category = state.categories.find(c => c.id === categoryId);
           if (category) {
-            // Update all 4 boulders with staggered starting positions
-            // Boulder 1: climber 0, Boulder 2: climber 1, etc.
-            const numClimbers = climbers.length;
+            // All boulders start at index 0 - climbers progress B1 -> B2 -> B3 -> B4
             category.boulders = [
               { boulderId: 1, climbers: [...climbers], currentClimberIndex: 0, held: category.boulders[0]?.held || false, hasStarted: false },
-              { boulderId: 2, climbers: [...climbers], currentClimberIndex: numClimbers > 1 ? 1 : 0, held: category.boulders[1]?.held || false, hasStarted: false },
-              { boulderId: 3, climbers: [...climbers], currentClimberIndex: numClimbers > 2 ? 2 : 0, held: category.boulders[2]?.held || false, hasStarted: false },
-              { boulderId: 4, climbers: [...climbers], currentClimberIndex: numClimbers > 3 ? 3 : 0, held: category.boulders[3]?.held || false, hasStarted: false }
+              { boulderId: 2, climbers: [...climbers], currentClimberIndex: 0, held: category.boulders[1]?.held || false, hasStarted: false },
+              { boulderId: 3, climbers: [...climbers], currentClimberIndex: 0, held: category.boulders[2]?.held || false, hasStarted: false },
+              { boulderId: 4, climbers: [...climbers], currentClimberIndex: 0, held: category.boulders[3]?.held || false, hasStarted: false }
             ];
             category.climberProgress = {};
             socket.emit('category-update', category);

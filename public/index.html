@@ -81,14 +81,6 @@
       color: rgba(255, 255, 255, 0.3);
     }
 
-    /* Boulder skip button styling */
-    .boulder-skip-btn {
-      transition: all 0.15s ease;
-    }
-    .boulder-skip-btn:hover {
-      background-color: rgba(239, 68, 68, 0.3) !important;
-      border-color: #ef4444 !important;
-    }
 
     /* Collapsible category styling */
     .category-details {
@@ -140,17 +132,6 @@
           <button id="testSound" class="px-2 py-1.5 rounded-lg bg-white bg-opacity-10 text-white text-xs font-semibold hover:bg-opacity-20 border border-gray-600" title="Test Sound">Sound</button>
         </div>
 
-        <!-- Climber Navigation Controls -->
-        <div id="climberControls" class="flex flex-wrap items-center justify-center gap-1 mt-2" style="display: none;">
-          <button id="nextAllClimbersBtn" class="px-2 py-1 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold">Next All</button>
-          <button id="nextBoulder1Btn" class="px-2 py-1 rounded-lg bg-gray-700 text-white text-xs hover:bg-gray-600">B1</button>
-          <button id="nextBoulder2Btn" class="px-2 py-1 rounded-lg bg-gray-700 text-white text-xs hover:bg-gray-600">B2</button>
-          <button id="nextBoulder3Btn" class="px-2 py-1 rounded-lg bg-gray-700 text-white text-xs hover:bg-gray-600">B3</button>
-          <button id="nextBoulder4Btn" class="px-2 py-1 rounded-lg bg-gray-700 text-white text-xs hover:bg-gray-600">B4</button>
-        </div>
-        <!-- Per-Category Advancement Buttons -->
-        <div id="categoryAdvanceButtons" class="flex flex-wrap items-center justify-center gap-1 mt-1" style="display: none;">
-        </div>
       </div>
 
       <!-- Config Panel -->
@@ -537,11 +518,6 @@
               <span class="font-semibold text-sm">${category.name}</span>
               <span class="text-xs text-gray-500">(${totalClimbers}${completedCount > 0 ? `, ${completedCount} done` : ''})</span>
             </div>
-            <div class="flex gap-1" title="Skip climber on boulder">
-              ${[1, 2, 3, 4].map(boulderId => {
-                return `<button class="boulder-skip-btn px-2 py-1 rounded text-xs font-semibold border border-gray-600 bg-gray-700 text-white hover:bg-gray-600" data-category-id="${category.id}" data-boulder-id="${boulderId}">B${boulderId}</button>`;
-              }).join('')}
-            </div>
           </div>
           <!-- Expandable Details -->
           <div class="category-details ${isExpanded ? 'expanded' : ''}" data-category-id="${category.id}">
@@ -619,15 +595,6 @@
         });
       });
 
-      // Wire up boulder skip buttons (skip current climber, insert empty that flows through)
-      document.querySelectorAll('.boulder-skip-btn').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-          const categoryId = parseInt(e.target.dataset.categoryId);
-          const boulderId = parseInt(e.target.dataset.boulderId);
-          socket.emit('skip-boulder-climber', { categoryId, boulderId });
-        });
-      });
-
       // Wire up reset progress buttons
       document.querySelectorAll('.reset-progress-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
@@ -642,13 +609,9 @@
 
     function renderClimberGrid() {
       const grid = document.getElementById('climberGrid');
-      const controlsDiv = document.getElementById('climberControls');
-      const categoryButtonsDiv = document.getElementById('categoryAdvanceButtons');
 
       if (state.categories.length === 0) {
         grid.style.display = 'none';
-        controlsDiv.style.display = 'none';
-        categoryButtonsDiv.style.display = 'none';
         return;
       }
 
@@ -664,13 +627,10 @@
 
       if (activeBoulderIds.size === 0) {
         grid.style.display = 'none';
-        controlsDiv.style.display = 'none';
-        categoryButtonsDiv.style.display = 'none';
         return;
       }
 
       grid.style.display = 'grid';
-      controlsDiv.style.display = 'flex';
       grid.setAttribute('data-categories', state.categories.length);
 
       // Set dynamic column count based on active boulders
@@ -683,69 +643,29 @@
       for (let categoryIndex = 0; categoryIndex < state.categories.length; categoryIndex++) {
         const category = state.categories[categoryIndex];
         const activeCount = getActiveClimberCount(category);
-        const completedCount = getCompletedClimberCount(category);
 
         for (const boulderId of sortedBoulderIds) {
           const boulder = category.boulders.find(b => b.boulderId === boulderId);
-          const isHeld = boulder?.held === true;
+          const isSkipped = boulder?.skipNext === true;
           const hasStarted = boulder?.hasStarted === true;
-          const climber = hasStarted ? boulder?.climbers?.[boulder?.currentClimberIndex || 0] : null;
+          const climber = hasStarted && !isSkipped ? boulder?.climbers?.[boulder?.currentClimberIndex || 0] : null;
           const climberCount = boulder?.climbers?.length || 0;
 
           // Show "ALL DONE" if all climbers completed
           const allDone = activeCount === 0 && climberCount > 0;
-          const isEmpty = !isHeld && !climber && !allDone;
+          const isEmpty = !climber && !allDone;
 
           html += `
-            <div class="climber-cell ${isHeld ? 'climber-cell-held' : ''} ${isEmpty ? 'climber-cell-empty' : ''}">
+            <div class="climber-cell ${isEmpty ? 'climber-cell-empty' : ''}">
               <div class="boulder-header">B${boulderId}</div>
               <div class="category-name">${category.name}</div>
-              <div class="climber-name">${isHeld ? 'HOLD' : (allDone ? 'DONE' : (climber || '—'))}</div>
+              <div class="climber-name">${allDone ? 'DONE' : (climber || '—')}</div>
             </div>
           `;
         }
       }
 
       grid.innerHTML = html;
-
-      // Render per-category advancement buttons
-      renderCategoryAdvanceButtons();
-    }
-
-    function renderCategoryAdvanceButtons() {
-      const categoryButtonsDiv = document.getElementById('categoryAdvanceButtons');
-
-      // Only show if we have categories with climbers
-      const hasClimbers = state.categories.some(c => c.boulders[0]?.climbers?.length > 0);
-      if (!hasClimbers || state.categories.length === 0) {
-        categoryButtonsDiv.style.display = 'none';
-        return;
-      }
-
-      categoryButtonsDiv.style.display = 'flex';
-
-      const buttonHtml = state.categories
-        .filter(c => c.boulders[0]?.climbers?.length > 0)
-        .map(category => {
-          const activeCount = getActiveClimberCount(category);
-          const allDone = activeCount === 0;
-          return `<button
-            class="category-advance-btn control-btn px-3 py-2 rounded-xl text-xs font-semibold ${allDone ? 'bg-gray-600 text-gray-400' : 'bg-green-600 hover:bg-green-700 text-white'}"
-            data-category-id="${category.id}"
-            ${allDone ? 'disabled' : ''}>
-            Next ${category.name}
-          </button>`;
-        }).join('');
-
-      categoryButtonsDiv.innerHTML = buttonHtml;
-
-      // Wire up event listeners
-      document.querySelectorAll('.category-advance-btn').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-          const categoryId = parseInt(e.target.dataset.categoryId);
-          socket.emit('advance-category', categoryId);
-        });
-      });
     }
 
     function addCategory() {
@@ -840,27 +760,6 @@
 
     // --- Wire category management controls ---
     document.getElementById('addCategoryBtn').addEventListener('click', addCategory);
-
-    // --- Wire climber navigation controls ---
-    document.getElementById('nextAllClimbersBtn').addEventListener('click', () => {
-      socket.emit('advance-all-climbers');
-    });
-
-    document.getElementById('nextBoulder1Btn').addEventListener('click', () => {
-      socket.emit('advance-boulder', 1);
-    });
-
-    document.getElementById('nextBoulder2Btn').addEventListener('click', () => {
-      socket.emit('advance-boulder', 2);
-    });
-
-    document.getElementById('nextBoulder3Btn').addEventListener('click', () => {
-      socket.emit('advance-boulder', 3);
-    });
-
-    document.getElementById('nextBoulder4Btn').addEventListener('click', () => {
-      socket.emit('advance-boulder', 4);
-    });
 
     // --- Excel Import Handler ---
     document.getElementById('excelFileInput').addEventListener('change', async (e) => {

@@ -263,13 +263,15 @@ function getNextActiveClimberIndex(boulder, category, startIndex) {
   return startIndex;
 }
 
-// Check if a boulder can start (previous boulder must have advanced at least once)
+// Check if a boulder can start (previous boulder must have advanced at least twice)
+// This ensures climbers get one full climb phase of rest between boulders
 function canBoulderStart(category, boulderIndex) {
   if (boulderIndex === 0) return true; // B1 can always start
 
   const prevBoulder = category.boulders[boulderIndex - 1];
-  // Previous boulder must be started AND have advanced at least once
-  return prevBoulder && prevBoulder.hasStarted && prevBoulder.currentClimberIndex > 0;
+  // Previous boulder must be started AND have advanced at least twice
+  // (climber needs 1 round climbing + 1 round resting before next boulder)
+  return prevBoulder && prevBoulder.hasStarted && prevBoulder.currentClimberIndex > 1;
 }
 
 // Advance a single boulder, recording progress and skipping completed climbers

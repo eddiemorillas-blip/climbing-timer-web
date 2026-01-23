@@ -136,14 +136,17 @@ app.post('/api/import-excel', upload.single('excel'), (req, res) => {
         ? Math.max(...timerState.categories.map(c => c.id))
         : 0;
 
+      // Each boulder starts with a different climber (staggered rotation)
+      // Boulder 1: climber 0, Boulder 2: climber 1, Boulder 3: climber 2, Boulder 4: climber 3
+      const numClimbers = climbers.length;
       return {
         id: maxId + colIndex + 1,
         name: String(categoryName).trim(),
         boulders: [
           { boulderId: 1, climbers: [...climbers], currentClimberIndex: 0, held: false, hasStarted: false },
-          { boulderId: 2, climbers: [...climbers], currentClimberIndex: 0, held: false, hasStarted: false },
-          { boulderId: 3, climbers: [...climbers], currentClimberIndex: 0, held: false, hasStarted: false },
-          { boulderId: 4, climbers: [...climbers], currentClimberIndex: 0, held: false, hasStarted: false }
+          { boulderId: 2, climbers: [...climbers], currentClimberIndex: numClimbers > 1 ? 1 : 0, held: false, hasStarted: false },
+          { boulderId: 3, climbers: [...climbers], currentClimberIndex: numClimbers > 2 ? 2 : 0, held: false, hasStarted: false },
+          { boulderId: 4, climbers: [...climbers], currentClimberIndex: numClimbers > 3 ? 3 : 0, held: false, hasStarted: false }
         ],
         climberProgress: {}
       };
@@ -548,9 +551,11 @@ io.on('connection', (socket) => {
       if (category) {
         // Reset climber progress tracking
         category.climberProgress = {};
-        // Reset all boulder indices to 0 and hasStarted to false
-        category.boulders.forEach(boulder => {
-          boulder.currentClimberIndex = 0;
+        // Reset boulder indices to staggered positions and hasStarted to false
+        const numClimbers = category.boulders[0]?.climbers?.length || 0;
+        category.boulders.forEach((boulder, index) => {
+          // Stagger: B1=0, B2=1, B3=2, B4=3 (if enough climbers)
+          boulder.currentClimberIndex = numClimbers > index ? index : 0;
           boulder.hasStarted = false;
         });
         console.log(`[${new Date().toISOString()}] Category progress reset by ${clientId}: ${category.name}`);

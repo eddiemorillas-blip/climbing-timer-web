@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@700&display=swap" rel="stylesheet">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Timer Display - Climbing Competition</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body {
+      background: #111;
+      color: #fff;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    .tabular-nums { font-variant-numeric: tabular-nums; }
+
+    /* Climber Grid */
+    .climber-grid {
+      display: grid;
+      gap: 0.5vw;
+      width: 100%;
+      padding: 1vw;
+    }
+    .climber-cell {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 0.5vw;
+      padding: 0.5vw;
+      text-align: center;
+    }
+    .boulder-header {
+      font-size: 1.2vw;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: rgba(255, 255, 255, 0.6);
+      margin-bottom: 0.2vw;
+    }
+    .category-name {
+      font-size: 1.5vw;
+      color: rgba(255, 255, 255, 0.8);
+      margin-bottom: 0.3vw;
+    }
+    .climber-name {
+      font-weight: 700;
+      line-height: 1.1;
+    }
+
+    /* Dynamic font sizing based on number of categories */
+    .climber-grid[data-categories="1"] .climber-name { font-size: 4vw; }
+    .climber-grid[data-categories="2"] .climber-name { font-size: 3vw; }
+    .climber-grid[data-categories="3"] .climber-name { font-size: 2.5vw; }
+    .climber-grid[data-categories="4"] .climber-name { font-size: 2vw; }
+
+    /* Hold state styling */
+    .climber-cell-held {
+      background: rgba(255, 165, 0, 0.15);
+      border-color: rgba(255, 165, 0, 0.4);
+    }
+    .climber-cell-held .climber-name {
+      color: #ffa500;
+    }
+
+    /* Empty cell styling */
+    .climber-cell-empty {
+      background: rgba(255, 255, 255, 0.02);
+      border-color: rgba(255, 255, 255, 0.1);
+    }
+    .climber-cell-empty .climber-name {
+      color: rgba(255, 255, 255, 0.3);
+    }
+
+    /* Timer display */
+    #timeDisplay {
+      font-family: 'Roboto Mono', 'Consolas', 'Menlo', 'Monaco', monospace;
+      font-size: 20vw;
+      line-height: 1;
+      letter-spacing: 0.04em;
+    }
+    #phaseLabel {
+      font-size: 3vw;
+    }
+
+    /* Phase colors */
+    .phase-climb { color: #22c55e; }
+    .phase-transition { color: #f59e0b; }
+    .phase-stopped { color: #9ca3af; }
+
+    /* Connection indicator */
+    .status-dot {
+      display: inline-block;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      margin-right: 8px;
+    }
+    .status-connected { background-color: #22c55e; }
+    .status-disconnected { background-color: #ef4444; }
+  </style>
+</head>
+<body>
+  <!-- Connection Status (top right corner) -->
+  <div class="fixed top-2 right-2 flex items-center text-sm opacity-50">
+    <span class="status-dot status-disconnected" id="statusDot"></span>
+    <span id="connectionStatus">Connecting...</span>
+  </div>
+
+  <!-- Climber Display Grid -->
+  <div id="climberGrid" class="climber-grid" data-categories="0" style="display: none;">
+    <!-- Dynamically populated by JavaScript -->
+  </div>
+
+  <!-- Timer Display -->
+  <div class="flex-1 flex flex-col items-center justify-center">
+    <div id="phaseLabel" class="font-semibold mb-2 phase-stopped">Ready</div>
+    <div id="timeDisplay" class="font-black tabular-nums">04:00</div>
+  </div>
+
+  <!-- Socket.IO Client Library -->
+  <script src="/socket.io/socket.io.js"></script>
+
+  <script>
+    // --- Socket.IO Connection ---
+    const socket = io();
+
+    socket.on('connect', () => {
+      document.getElementById('statusDot').className = 'status-dot status-connected';
+      document.getElementById('connectionStatus').textContent = 'Connected';
+    });
+
+    socket.on('disconnect', () => {
+      document.getElementById('statusDot').className = 'status-dot status-disconnected';
+      document.getElementById('connectionStatus').textContent = 'Disconnected';
+    });
+
+    // --- App State ---
+    const state = {
+      phase: 'stopped',
+      remaining: 240,
+      categories: []
+    };
+
+    const fmt = (s) => {
+      s = Math.max(0, Math.floor(s));
+      const m = Math.floor(s / 60), r = s % 60;
+      return String(m).padStart(2, '0') + ':' + String(r).padStart(2, '0');
+    };
+
+    function updateDisplay() {
+      document.getElementById('timeDisplay').textContent = fmt(state.remaining);
+      const phaseLabel = document.getElementById('phaseLabel');
+      phaseLabel.textContent = state.phase === 'stopped' ? 'Ready' : (state.phase === 'climb' ? 'CLIMB' : 'TRANSITION');
+      phaseLabel.className = `font-semibold mb-2 phase-${state.phase}`;
+    }
+
+    // --- Completion Tracking Helpers ---
+    function isClimberCompleted(category, climberName) {
+      const progress = category.climberProgress?.[climberName] || [];
+      return progress.length >= 4 && [1, 2, 3, 4].every(b => progress.includes(b));
+    }
+
+    function getActiveClimberCount(category) {
+      const climbers = category.boulders[0]?.climbers || [];
+      return climbers.filter(name => !isClimberCompleted(category, name)).length;
+    }
+
+    // --- Listen for state updates from server ---
+    socket.on('timer-sync', (serverState) => {
+      state.phase = serverState.phase;
+      state.remaining = serverState.remaining;
+      updateDisplay();
+    });
+
+    socket.on('categories-sync', (categories) => {
+      state.categories = categories || [];
+      renderClimberGrid();
+    });
+
+    function renderClimberGrid() {
+      const grid = document.getElementById('climberGrid');
+
+      if (state.categories.length === 0) {
+        grid.style.display = 'none';
+        return;
+      }
+
+      // Find which boulders have climbers across ANY category
+      const activeBoulderIds = new Set();
+      state.categories.forEach(category => {
+        category.boulders.forEach(boulder => {
+          if (boulder.climbers && boulder.climbers.length > 0) {
+            activeBoulderIds.add(boulder.boulderId);
+          }
+        });
+      });
+
+      if (activeBoulderIds.size === 0) {
+        grid.style.display = 'none';
+        return;
+      }
+
+      grid.style.display = 'grid';
+      grid.setAttribute('data-categories', state.categories.length);
+
+      // Set dynamic column count based on active boulders
+      const sortedBoulderIds = [...activeBoulderIds].sort((a, b) => a - b);
+      grid.style.gridTemplateColumns = `repeat(${sortedBoulderIds.length}, 1fr)`;
+
+      let html = '';
+
+      // Create grid with only active boulders × N categories
+      for (let categoryIndex = 0; categoryIndex < state.categories.length; categoryIndex++) {
+        const category = state.categories[categoryIndex];
+        const activeCount = getActiveClimberCount(category);
+
+        for (const boulderId of sortedBoulderIds) {
+          const boulder = category.boulders.find(b => b.boulderId === boulderId);
+          const isHeld = boulder?.held === true;
+          const hasStarted = boulder?.hasStarted === true;
+          const climber = hasStarted ? boulder?.climbers?.[boulder?.currentClimberIndex || 0] : null;
+          const climberCount = boulder?.climbers?.length || 0;
+
+          // Show "ALL DONE" if all climbers completed
+          const allDone = activeCount === 0 && climberCount > 0;
+          const isEmpty = !isHeld && !climber && !allDone;
+
+          html += `
+            <div class="climber-cell ${isHeld ? 'climber-cell-held' : ''} ${isEmpty ? 'climber-cell-empty' : ''}">
+              <div class="boulder-header">Boulder ${boulderId}</div>
+              <div class="category-name">${category.name}</div>
+              <div class="climber-name">${isHeld ? 'HOLD' : (allDone ? 'DONE' : (climber || '—'))}</div>
+            </div>
+          `;
+        }
+      }
+
+      grid.innerHTML = html;
+    }
+
+    // Init
+    updateDisplay();
+  </script>
+</body>
+</html>

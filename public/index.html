@@ -18,44 +18,7 @@
       outline: 2px solid #fff !important;
       background: #333 !important;
     }
-    /* Ensure dark mode in fullscreen */
-    #timerCard:fullscreen, #timerCard:fullscreen * {
-      background: #111 !important;
-      color: #fff !important;
-      border-color: #fff !important;
-    }
     .tabular-nums { font-variant-numeric: tabular-nums; }
-
-    /* Fullscreen layout & typography */
-    #timerCard:fullscreen {
-      display: flex; flex-direction: column; align-items: center; justify-content: center;
-      width: 100vw; height: 100vh; padding: 0; margin: 0; border-radius: 0; box-shadow: none; background: white;
-    }
-    #timerCard:fullscreen #timeDisplay {
-      font-family: 'Roboto Mono', 'Consolas', 'Menlo', 'Monaco', monospace;
-      font-size: 28vw;
-      line-height: 0.95;
-      margin: 0;
-      letter-spacing: 0.04em;
-    }
-    #timerCard:fullscreen #phaseLabel {
-      font-size: 4vw;
-      margin-top: 2.5vw;
-      margin-bottom: 2vw;
-    }
-    #timerCard:fullscreen .control-btn { font-size: 2.8vw; padding: 1.25em 1em; }
-
-    /* Hide UI in fullscreen while running; show only time */
-    #timerCard:fullscreen.fs-running .controls,
-    #timerCard:fullscreen.fs-running .hint {
-      opacity: 0; pointer-events: none; visibility: hidden; transition: opacity 120ms ease;
-    }
-    /* When mouse moves, show controls briefly */
-    #timerCard:fullscreen.fs-running.show-ui #phaseLabel,
-    #timerCard:fullscreen.fs-running.show-ui .controls,
-    #timerCard:fullscreen.fs-running.show-ui .hint {
-      opacity: 1; pointer-events: auto; visibility: visible;
-    }
 
     /* Connection status indicator */
     .status-dot {
@@ -68,43 +31,41 @@
     .status-connected { background-color: #22c55e; }
     .status-disconnected { background-color: #ef4444; }
 
-    /* Climber Grid - Dynamic Scaling */
+    /* Climber Grid - Compact */
     .climber-grid {
       display: grid;
-      /* Columns set dynamically via JavaScript based on active boulders */
-      gap: 0.5rem;
-      margin-bottom: 2rem;
+      gap: 0.25rem;
+      margin-bottom: 0.5rem;
       width: 100%;
     }
     .climber-cell {
       background: rgba(255, 255, 255, 0.05);
       border: 1px solid rgba(255, 255, 255, 0.2);
-      border-radius: 0.75rem;
-      padding: 0.75rem;
+      border-radius: 0.5rem;
+      padding: 0.35rem;
       text-align: center;
     }
     .boulder-header {
-      font-size: 0.75rem;
+      font-size: 0.6rem;
       font-weight: 600;
       text-transform: uppercase;
       letter-spacing: 0.05em;
       color: rgba(255, 255, 255, 0.6);
-      margin-bottom: 0.25rem;
     }
     .category-name {
-      font-size: 0.85rem;
+      font-size: 0.65rem;
       color: rgba(255, 255, 255, 0.8);
-      margin-bottom: 0.5rem;
     }
     .climber-name {
       font-weight: 700;
-      line-height: 1.2;
-      margin-bottom: 0.25rem;
+      line-height: 1.1;
     }
-    .climber-count {
-      font-size: 0.7rem;
-      color: rgba(255, 255, 255, 0.5);
-    }
+
+    /* Dynamic font sizing based on number of categories */
+    .climber-grid[data-categories="1"] .climber-name { font-size: 1.25rem; }
+    .climber-grid[data-categories="2"] .climber-name { font-size: 1rem; }
+    .climber-grid[data-categories="3"] .climber-name { font-size: 0.9rem; }
+    .climber-grid[data-categories="4"] .climber-name { font-size: 0.8rem; }
 
     /* Hold state styling */
     .climber-cell-held {
@@ -113,10 +74,11 @@
     }
     .climber-cell-held .climber-name {
       color: #ffa500;
-      font-style: italic;
     }
-    .climber-cell-held .climber-count {
-      color: rgba(255, 165, 0, 0.7);
+
+    /* Empty cell styling */
+    .climber-cell-empty .climber-name {
+      color: rgba(255, 255, 255, 0.3);
     }
 
     /* Boulder hold button styling */
@@ -129,140 +91,109 @@
       color: #ffa500 !important;
     }
 
-    /* Completed climber state styling */
-    .climber-cell-done {
-      background: rgba(34, 197, 94, 0.15);
-      border-color: rgba(34, 197, 94, 0.4);
+    /* Collapsible category styling */
+    .category-details {
+      max-height: 0;
+      overflow: hidden;
+      transition: max-height 0.2s ease-out;
     }
-    .climber-cell-done .climber-name {
-      color: #22c55e;
+    .category-details.expanded {
+      max-height: 500px;
     }
-    .climber-cell-done .climber-count {
-      color: rgba(34, 197, 94, 0.7);
+    .expand-btn {
+      transition: transform 0.2s ease;
     }
-
-    /* Dynamic font sizing based on number of categories */
-    .climber-grid[data-categories="1"] .climber-name { font-size: 2rem; }
-    .climber-grid[data-categories="2"] .climber-name { font-size: 1.5rem; }
-    .climber-grid[data-categories="3"] .climber-name { font-size: 1.25rem; }
-    .climber-grid[data-categories="4"] .climber-name { font-size: 1rem; }
-
-    /* Fullscreen climber grid scaling */
-    #timerCard:fullscreen .climber-grid {
-      gap: 1rem;
-      margin-bottom: 3rem;
+    .expand-btn.expanded {
+      transform: rotate(180deg);
     }
-    #timerCard:fullscreen .climber-grid[data-categories="1"] .climber-name { font-size: 4.5vw; }
-    #timerCard:fullscreen .climber-grid[data-categories="2"] .climber-name { font-size: 3.5vw; }
-    #timerCard:fullscreen .climber-grid[data-categories="3"] .climber-name { font-size: 2.8vw; }
-    #timerCard:fullscreen .climber-grid[data-categories="4"] .climber-name { font-size: 2.2vw; }
-    #timerCard:fullscreen .boulder-header { font-size: 1.5vw; }
-    #timerCard:fullscreen .category-name { font-size: 1.8vw; }
-    #timerCard:fullscreen .climber-count { font-size: 1.2vw; }
   </style>
 </head>
-<body class="min-h-screen bg-black text-white">
-  <div class="max-w-3xl mx-auto p-6">
-    <header class="mb-6 flex items-center justify-between">
-      <h1 class="text-2xl sm:text-3xl font-bold">Climbing Competition Timer</h1>
+<body class="bg-black text-white">
+  <div class="max-w-4xl mx-auto p-3">
+    <header class="mb-3 flex items-center justify-between">
+      <h1 class="text-xl font-bold">Climbing Timer - Operator</h1>
       <div class="flex gap-2 items-center">
-        <div class="px-3 py-2 rounded-2xl bg-white bg-opacity-10 text-white text-sm flex items-center">
+        <div class="px-2 py-1 rounded-lg bg-white bg-opacity-10 text-white text-xs flex items-center">
           <span class="status-dot status-disconnected" id="statusDot"></span>
           <span id="connectionStatus">Connecting...</span>
         </div>
-        <button class="px-3 py-2 rounded-2xl bg-white bg-opacity-10 text-white shadow hover:bg-opacity-30 border border-white text-sm" id="fullscreenBtn" title="Fullscreen Timer">⛶</button>
+        <button class="px-3 py-1 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold" id="openDisplayBtn" title="Open Display Window">Open Display</button>
       </div>
     </header>
 
-    <!-- Config Grid -->
-    <div class="grid md:grid-cols-2 gap-4 mb-6">
-  <div class="bg-gray-900 rounded-2xl shadow p-4">
-        <h2 class="font-semibold text-lg mb-3">Climbing Time</h2>
-        <div class="flex items-end gap-2">
-          <label class="grid gap-1">
-            <span class="text-xs text-gray-500">Min</span>
-            <input id="climbMin" type="number" min="0" value="4" class="w-24 px-3 py-2 rounded-xl border bg-white shadow-inner" />
-          </label>
-          <span class="pb-6 text-xl">:</span>
-          <label class="grid gap-1">
-            <span class="text-xs text-gray-500">Sec</span>
-            <input id="climbSec" type="number" min="0" max="59" value="0" class="w-24 px-3 py-2 rounded-xl border bg-white shadow-inner" />
-          </label>
+    <!-- Main Grid: Timer + Config side by side -->
+    <div class="grid grid-cols-2 gap-3 mb-3">
+      <!-- Timer Card -->
+      <div id="timerCard" class="bg-gray-900 rounded-xl shadow p-3 text-center">
+        <!-- Climber Display Grid -->
+        <div id="climberGrid" class="climber-grid" data-categories="0" style="display: none;">
+          <!-- Dynamically populated by JavaScript -->
+        </div>
+
+        <div class="text-xs uppercase tracking-wide text-gray-400">Phase</div>
+        <div id="phaseLabel" class="text-lg font-semibold mb-1">Ready</div>
+        <div id="timeDisplay" class="text-5xl font-black tabular-nums leading-none mb-2" style="font-family: 'Roboto Mono', monospace;">04:00</div>
+
+        <div class="flex flex-wrap items-center justify-center gap-2">
+          <button id="startPause" class="px-3 py-1.5 rounded-lg bg-green-600 hover:bg-green-700 text-white text-sm font-semibold">Start</button>
+          <button id="reset" class="px-3 py-1.5 rounded-lg bg-white bg-opacity-10 text-white text-sm font-semibold hover:bg-opacity-20 border border-gray-600">Reset</button>
+          <button id="nextPhase" class="px-3 py-1.5 rounded-lg bg-white bg-opacity-10 text-white text-sm font-semibold hover:bg-opacity-20 border border-gray-600">Skip</button>
+          <button id="testSound" class="px-2 py-1.5 rounded-lg bg-white bg-opacity-10 text-white text-xs font-semibold hover:bg-opacity-20 border border-gray-600" title="Test Sound">Sound</button>
+        </div>
+
+        <!-- Climber Navigation Controls -->
+        <div id="climberControls" class="flex flex-wrap items-center justify-center gap-1 mt-2" style="display: none;">
+          <button id="nextAllClimbersBtn" class="px-2 py-1 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold">Next All</button>
+          <button id="nextBoulder1Btn" class="px-2 py-1 rounded-lg bg-gray-700 text-white text-xs hover:bg-gray-600">B1</button>
+          <button id="nextBoulder2Btn" class="px-2 py-1 rounded-lg bg-gray-700 text-white text-xs hover:bg-gray-600">B2</button>
+          <button id="nextBoulder3Btn" class="px-2 py-1 rounded-lg bg-gray-700 text-white text-xs hover:bg-gray-600">B3</button>
+          <button id="nextBoulder4Btn" class="px-2 py-1 rounded-lg bg-gray-700 text-white text-xs hover:bg-gray-600">B4</button>
+        </div>
+        <!-- Per-Category Advancement Buttons -->
+        <div id="categoryAdvanceButtons" class="flex flex-wrap items-center justify-center gap-1 mt-1" style="display: none;">
         </div>
       </div>
 
-  <div class="bg-gray-900 rounded-2xl shadow p-4">
-        <h2 class="font-semibold text-lg mb-3">Transition Time</h2>
-        <div class="flex items-end gap-2">
-          <label class="grid gap-1">
-            <span class="text-xs text-gray-500">Min</span>
-            <input id="transMin" type="number" min="0" value="1" class="w-24 px-3 py-2 rounded-xl border bg-white shadow-inner" />
-          </label>
-          <span class="pb-6 text-xl">:</span>
-          <label class="grid gap-1">
-            <span class="text-xs text-gray-500">Sec</span>
-            <input id="transSec" type="number" min="0" max="59" value="0" class="w-24 px-3 py-2 rounded-xl border bg-white shadow-inner" />
-          </label>
+      <!-- Config Panel -->
+      <div class="bg-gray-900 rounded-xl shadow p-3">
+        <div class="grid grid-cols-2 gap-3 mb-3">
+          <div>
+            <h3 class="text-xs font-semibold text-gray-400 mb-1">Climb Time</h3>
+            <div class="flex items-center gap-1">
+              <input id="climbMin" type="number" min="0" value="4" class="w-12 px-2 py-1 rounded text-sm" />
+              <span class="text-gray-500">:</span>
+              <input id="climbSec" type="number" min="0" max="59" value="0" class="w-12 px-2 py-1 rounded text-sm" />
+            </div>
+          </div>
+          <div>
+            <h3 class="text-xs font-semibold text-gray-400 mb-1">Transition</h3>
+            <div class="flex items-center gap-1">
+              <input id="transMin" type="number" min="0" value="1" class="w-12 px-2 py-1 rounded text-sm" />
+              <span class="text-gray-500">:</span>
+              <input id="transSec" type="number" min="0" max="59" value="0" class="w-12 px-2 py-1 rounded text-sm" />
+            </div>
+          </div>
         </div>
-        <p class="text-xs text-gray-500 mt-2">Transition runs automatically between climbs.</p>
-      </div>
-    </div>
 
-    <!-- Category Management -->
-    <div class="bg-gray-900 rounded-2xl shadow p-4 mb-6">
-      <div class="flex items-center justify-between mb-3">
-        <h2 class="font-semibold text-lg">Categories & Climbers</h2>
-        <div class="flex gap-2">
-          <label class="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-sm font-semibold cursor-pointer" title="Import from Excel">
-            Import Excel
-            <input type="file" id="excelFileInput" accept=".xlsx,.xls" class="hidden" />
-          </label>
-          <button id="addCategoryBtn" class="px-4 py-2 rounded-xl bg-green-600 hover:bg-green-700 text-white text-sm font-semibold" title="Add Category (Max 4)">+ Add Category</button>
+        <!-- Category Management -->
+        <div class="flex items-center justify-between mb-2">
+          <h3 class="text-xs font-semibold text-gray-400">Categories</h3>
+          <div class="flex gap-1">
+            <label class="px-2 py-1 rounded bg-purple-600 hover:bg-purple-700 text-white text-xs font-semibold cursor-pointer">
+              Excel
+              <input type="file" id="excelFileInput" accept=".xlsx,.xls" class="hidden" />
+            </label>
+            <button id="addCategoryBtn" class="px-2 py-1 rounded bg-green-600 hover:bg-green-700 text-white text-xs font-semibold">+ Add</button>
+          </div>
+        </div>
+        <div id="categoriesList" class="space-y-2 max-h-64 overflow-y-auto">
+          <p class="text-xs text-gray-500">No categories yet.</p>
         </div>
       </div>
-      <div id="categoriesList" class="space-y-3">
-        <p class="text-sm text-gray-400">No categories yet. Click "Add Category" to get started.</p>
-      </div>
     </div>
 
-    <!-- Display Card (Fullscreen Target) -->
-  <div id="timerCard" class="bg-gray-900 rounded-3xl shadow p-6 md:p-10 mb-6 text-center">
-      <!-- Climber Display Grid -->
-      <div id="climberGrid" class="climber-grid" data-categories="0" style="display: none;">
-        <!-- Dynamically populated by JavaScript -->
-      </div>
-
-  <div class="text-sm uppercase tracking-wide text-gray-300 mb-2">Phase</div>
-      <div id="phaseLabel" class="text-2xl font-semibold mb-4">Ready</div>
-
-  <div id="timeDisplay" class="text-7xl md:text-8xl font-black tabular-nums leading-none mb-6" style="font-family: 'Roboto Mono', 'Consolas', 'Menlo', 'Monaco', monospace; letter-spacing: 0.04em;">04:00</div>
-
-      <div id="controls" class="controls flex flex-wrap items-center justify-center gap-3">
-        <button id="startPause" class="control-btn px-5 py-3 rounded-2xl bg-white bg-opacity-10 text-white font-semibold shadow hover:bg-opacity-30 border border-white">Start</button>
-        <button id="reset" class="control-btn px-5 py-3 rounded-2xl bg-white bg-opacity-10 text-white font-semibold shadow hover:bg-opacity-30 border border-white">Reset</button>
-        <button id="nextPhase" class="control-btn px-5 py-3 rounded-2xl bg-white bg-opacity-10 text-white font-semibold shadow hover:bg-opacity-30 border border-white">Next Phase</button>
-        <button id="testSound" class="control-btn px-5 py-3 rounded-2xl bg-white bg-opacity-10 text-white font-semibold shadow hover:bg-opacity-30 border border-white" title="Play a sample beep">Test Sound</button>
-      </div>
-
-      <!-- Climber Navigation Controls -->
-      <div id="climberControls" class="controls flex flex-wrap items-center justify-center gap-2 mt-4" style="display: none;">
-        <button id="nextAllClimbersBtn" class="control-btn px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold">Next All Climbers</button>
-        <button id="nextBoulder1Btn" class="control-btn px-3 py-2 rounded-xl bg-white bg-opacity-10 text-white text-xs font-semibold hover:bg-opacity-20 border border-white">Next B1</button>
-        <button id="nextBoulder2Btn" class="control-btn px-3 py-2 rounded-xl bg-white bg-opacity-10 text-white text-xs font-semibold hover:bg-opacity-20 border border-white">Next B2</button>
-        <button id="nextBoulder3Btn" class="control-btn px-3 py-2 rounded-xl bg-white bg-opacity-10 text-white text-xs font-semibold hover:bg-opacity-20 border border-white">Next B3</button>
-        <button id="nextBoulder4Btn" class="control-btn px-3 py-2 rounded-xl bg-white bg-opacity-10 text-white text-xs font-semibold hover:bg-opacity-20 border border-white">Next B4</button>
-      </div>
-      <!-- Per-Category Advancement Buttons -->
-      <div id="categoryAdvanceButtons" class="controls flex flex-wrap items-center justify-center gap-2 mt-2" style="display: none;">
-        <!-- Dynamically populated per-category buttons -->
-      </div>
-
-  <p class="hint text-xs text-gray-300 mt-4">Tones: 1 beep at 1:00 left (climb), short beeps at 5..4..3..2..1, and a distinct buzzer at the end of climb. Move mouse to show controls in fullscreen.</p>
-    </div>
-
-  <footer class="text-center text-xs text-gray-300">
-      <span id="clientCount">Connected clients: 0</span> •
-      Pro tip: Click a preset above, then Start. Sounds require a user gesture on some browsers; if you don't hear anything, press Start/Resume once.
+    <footer class="text-center text-xs text-gray-500">
+      <span id="clientCount">Connected: 0</span>
     </footer>
   </div>
 
@@ -307,7 +238,8 @@
       compressor: null,
       syncInProgress: false,  // Flag to prevent sync loops
       lastPhaseChangeTime: 0,  // Track when we last changed phase
-      categories: []  // Categories with climbers for 4 boulders
+      categories: [],  // Categories with climbers for 4 boulders
+      expandedCategories: {}  // Track which categories are expanded
     };
 
     function ensureAudio(){
@@ -587,7 +519,7 @@
       const container = document.getElementById('categoriesList');
 
       if (state.categories.length === 0) {
-        container.innerHTML = '<p class="text-sm text-gray-400">No categories yet. Click "Add Category" to get started.</p>';
+        container.innerHTML = '<p class="text-xs text-gray-500">No categories yet.</p>';
         return;
       }
 
@@ -595,44 +527,58 @@
         const totalClimbers = category.boulders[0]?.climbers?.length || 0;
         const completedCount = getCompletedClimberCount(category);
         const activeCount = getActiveClimberCount(category);
+        const isExpanded = state.expandedCategories?.[category.id] || false;
 
         return `
-        <div class="bg-gray-800 rounded-xl p-4 border border-gray-700">
-          <div class="flex items-start justify-between mb-3">
-            <div class="flex-1">
-              <input type="text"
-                value="${category.name}"
-                class="category-name-input bg-gray-700 text-white px-3 py-2 rounded-lg w-full font-semibold text-lg"
-                data-category-id="${category.id}"
-                placeholder="Category Name (e.g., Women 18-24)" />
+        <div class="bg-gray-800 rounded-lg border border-gray-700">
+          <!-- Collapsed Header -->
+          <div class="p-2 flex items-center justify-between">
+            <div class="flex items-center gap-2 flex-1">
+              <button class="expand-btn text-gray-400 hover:text-white ${isExpanded ? 'expanded' : ''}" data-category-id="${category.id}">▼</button>
+              <span class="font-semibold text-sm">${category.name}</span>
+              <span class="text-xs text-gray-500">(${totalClimbers}${completedCount > 0 ? `, ${completedCount} done` : ''})</span>
             </div>
-            <button class="delete-category-btn ml-3 px-3 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white text-sm font-semibold" data-category-id="${category.id}">Delete</button>
-          </div>
-          <div class="mb-3">
-            <label class="block text-sm text-gray-400 mb-2">Import Climbers (one name per line)</label>
-            <textarea
-              class="climbers-textarea bg-gray-700 text-white px-3 py-2 rounded-lg w-full text-sm font-mono"
-              data-category-id="${category.id}"
-              rows="4"
-              placeholder="Sarah Johnson&#10;Emily Chen&#10;Maria Garcia">${(category.boulders[0]?.climbers || []).join('\n')}</textarea>
-            <button class="import-climbers-btn mt-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold" data-category-id="${category.id}">Import Climbers</button>
-          </div>
-          <div class="flex items-center justify-between text-sm text-gray-400 mb-3">
-            <span>${totalClimbers} climbers imported${completedCount > 0 ? ` (${activeCount} active, ${completedCount} done)` : ''}</span>
-            ${totalClimbers > 0 ? `<button class="reset-progress-btn px-3 py-1 rounded-lg bg-yellow-600 hover:bg-yellow-700 text-white text-xs font-semibold" data-category-id="${category.id}">Reset Progress</button>` : ''}
-          </div>
-          <div class="pt-3 border-t border-gray-600">
-            <label class="block text-sm text-gray-400 mb-2">Boulder Hold Status</label>
-            <div class="flex gap-2">
+            <div class="flex gap-1">
               ${[1, 2, 3, 4].map(boulderId => {
                 const boulder = category.boulders.find(b => b.boulderId === boulderId);
                 const isHeld = boulder?.held === true;
-                return `<button class="boulder-hold-btn flex-1 px-3 py-2 rounded-lg text-xs font-semibold border border-gray-600 ${isHeld ? 'held' : 'bg-gray-700 text-white hover:bg-gray-600'}" data-category-id="${category.id}" data-boulder-id="${boulderId}">B${boulderId}${isHeld ? ' (HOLD)' : ''}</button>`;
+                return `<button class="boulder-hold-btn px-2 py-1 rounded text-xs font-semibold border border-gray-600 ${isHeld ? 'held' : 'bg-gray-700 text-white hover:bg-gray-600'}" data-category-id="${category.id}" data-boulder-id="${boulderId}">B${boulderId}</button>`;
               }).join('')}
+            </div>
+          </div>
+          <!-- Expandable Details -->
+          <div class="category-details ${isExpanded ? 'expanded' : ''}" data-category-id="${category.id}">
+            <div class="px-2 pb-2 border-t border-gray-700 pt-2">
+              <div class="flex items-center gap-2 mb-2">
+                <input type="text"
+                  value="${category.name}"
+                  class="category-name-input bg-gray-700 text-white px-2 py-1 rounded text-sm flex-1"
+                  data-category-id="${category.id}"
+                  placeholder="Category Name" />
+                <button class="delete-category-btn px-2 py-1 rounded bg-red-600 hover:bg-red-700 text-white text-xs" data-category-id="${category.id}">Delete</button>
+              </div>
+              <textarea
+                class="climbers-textarea bg-gray-700 text-white px-2 py-1 rounded w-full text-xs font-mono mb-2"
+                data-category-id="${category.id}"
+                rows="3"
+                placeholder="One name per line">${(category.boulders[0]?.climbers || []).join('\n')}</textarea>
+              <div class="flex gap-2">
+                <button class="import-climbers-btn px-2 py-1 rounded bg-blue-600 hover:bg-blue-700 text-white text-xs" data-category-id="${category.id}">Save List</button>
+                ${totalClimbers > 0 ? `<button class="reset-progress-btn px-2 py-1 rounded bg-yellow-600 hover:bg-yellow-700 text-white text-xs" data-category-id="${category.id}">Reset</button>` : ''}
+              </div>
             </div>
           </div>
         </div>
       `}).join('');
+
+      // Wire up expand buttons
+      document.querySelectorAll('.expand-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          const categoryId = parseInt(e.target.dataset.categoryId);
+          state.expandedCategories[categoryId] = !state.expandedCategories[categoryId];
+          renderCategoriesList();
+        });
+      });
 
       // Wire up event listeners
       document.querySelectorAll('.category-name-input').forEach(input => {
@@ -663,13 +609,14 @@
 
           const category = state.categories.find(c => c.id === categoryId);
           if (category) {
-            // Update all 4 boulders with the same climber list, preserving held state
+            // Update all 4 boulders with the same climber list, preserving held state, reset hasStarted
             category.boulders = [
-              { boulderId: 1, climbers: [...climbers], currentClimberIndex: 0, held: category.boulders[0]?.held || false },
-              { boulderId: 2, climbers: [...climbers], currentClimberIndex: 0, held: category.boulders[1]?.held || false },
-              { boulderId: 3, climbers: [...climbers], currentClimberIndex: 0, held: category.boulders[2]?.held || false },
-              { boulderId: 4, climbers: [...climbers], currentClimberIndex: 0, held: category.boulders[3]?.held || false }
+              { boulderId: 1, climbers: [...climbers], currentClimberIndex: 0, held: category.boulders[0]?.held || false, hasStarted: false },
+              { boulderId: 2, climbers: [...climbers], currentClimberIndex: 0, held: category.boulders[1]?.held || false, hasStarted: false },
+              { boulderId: 3, climbers: [...climbers], currentClimberIndex: 0, held: category.boulders[2]?.held || false, hasStarted: false },
+              { boulderId: 4, climbers: [...climbers], currentClimberIndex: 0, held: category.boulders[3]?.held || false, hasStarted: false }
             ];
+            category.climberProgress = {};
             socket.emit('category-update', category);
           }
         });
@@ -689,7 +636,7 @@
         btn.addEventListener('click', (e) => {
           const categoryId = parseInt(e.target.dataset.categoryId);
           const category = state.categories.find(c => c.id === categoryId);
-          if (category && confirm(`Reset progress for all climbers in "${category.name}"? This will clear completion tracking and reset to the first climber.`)) {
+          if (category && confirm(`Reset progress for "${category.name}"?`)) {
             socket.emit('reset-category-progress', categoryId);
           }
         });
@@ -744,24 +691,19 @@
         for (const boulderId of sortedBoulderIds) {
           const boulder = category.boulders.find(b => b.boulderId === boulderId);
           const isHeld = boulder?.held === true;
-          const climber = boulder?.climbers?.[boulder?.currentClimberIndex || 0];
+          const hasStarted = boulder?.hasStarted === true;
+          const climber = hasStarted ? boulder?.climbers?.[boulder?.currentClimberIndex || 0] : null;
           const climberCount = boulder?.climbers?.length || 0;
-          const currentIndex = boulder?.currentClimberIndex || 0;
-
-          // Check if current climber is completed (showing all 4 boulders done)
-          const isClimberDone = climber && isClimberCompleted(category, climber);
-          const climberProgress = climber ? getClimberProgress(category, climber) : [];
-          const progressText = climberProgress.length > 0 ? ` (${climberProgress.length}/4)` : '';
 
           // Show "ALL DONE" if all climbers completed
           const allDone = activeCount === 0 && climberCount > 0;
+          const isEmpty = !isHeld && !climber && !allDone;
 
           html += `
-            <div class="climber-cell ${isHeld ? 'climber-cell-held' : ''} ${isClimberDone ? 'climber-cell-done' : ''}">
-              <div class="boulder-header">Boulder ${boulderId}</div>
+            <div class="climber-cell ${isHeld ? 'climber-cell-held' : ''} ${isEmpty ? 'climber-cell-empty' : ''}">
+              <div class="boulder-header">B${boulderId}</div>
               <div class="category-name">${category.name}</div>
-              <div class="climber-name">${isHeld ? 'HOLD' : (allDone ? 'ALL DONE' : (climber || '—'))}</div>
-              <div class="climber-count">${isHeld ? 'On Hold' : (allDone ? `${completedCount} completed` : (climberCount > 0 ? `${activeCount} active${progressText}` : 'No climbers'))}</div>
+              <div class="climber-name">${isHeld ? 'HOLD' : (allDone ? 'DONE' : (climber || '—'))}</div>
             </div>
           `;
         }
@@ -820,53 +762,20 @@
         id: newId,
         name: `Category ${newId}`,
         boulders: [
-          { boulderId: 1, climbers: [], currentClimberIndex: 0, held: false },
-          { boulderId: 2, climbers: [], currentClimberIndex: 0, held: false },
-          { boulderId: 3, climbers: [], currentClimberIndex: 0, held: false },
-          { boulderId: 4, climbers: [], currentClimberIndex: 0, held: false }
-        ]
+          { boulderId: 1, climbers: [], currentClimberIndex: 0, held: false, hasStarted: false },
+          { boulderId: 2, climbers: [], currentClimberIndex: 0, held: false, hasStarted: false },
+          { boulderId: 3, climbers: [], currentClimberIndex: 0, held: false, hasStarted: false },
+          { boulderId: 4, climbers: [], currentClimberIndex: 0, held: false, hasStarted: false }
+        ],
+        climberProgress: {}
       };
 
       socket.emit('category-update', newCategory);
     }
 
-    // --- Fullscreen & UI visibility ---
-    const timerCard = document.getElementById('timerCard');
-    const fsBtn = document.getElementById('fullscreenBtn');
-    fsBtn.addEventListener('click', () => {
-      if (!document.fullscreenElement) {
-        timerCard.requestFullscreen().then(() => {
-          refreshUiVisibility(true);
-        }).catch(err => {
-          alert(`Error attempting to enable fullscreen: ${err.message}`);
-        });
-      } else {
-        document.exitFullscreen();
-      }
-    });
-
-    let uiHideTimer = null;
-    function refreshUiVisibility(forceShow=false) {
-      const inFS = !!document.fullscreenElement;
-      if (inFS && state.running) {
-        timerCard.classList.add('fs-running');
-        if (forceShow) {
-          timerCard.classList.add('show-ui');
-          clearTimeout(uiHideTimer);
-          uiHideTimer = setTimeout(() => timerCard.classList.remove('show-ui'), 2000);
-        }
-      } else {
-        timerCard.classList.remove('fs-running');
-        timerCard.classList.add('show-ui');
-      }
-    }
-
-    ['mousemove','mousedown','keydown','touchstart','pointermove'].forEach(evt => {
-      document.addEventListener(evt, () => refreshUiVisibility(true), { passive: true });
-    });
-
-    document.addEventListener('fullscreenchange', () => {
-      refreshUiVisibility(true);
+    // --- Open Display Window ---
+    document.getElementById('openDisplayBtn').addEventListener('click', () => {
+      window.open('/display.html', 'timerDisplay', 'width=1920,height=1080');
     });
 
     // --- Wire controls ---

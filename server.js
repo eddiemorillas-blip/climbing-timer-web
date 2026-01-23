@@ -140,10 +140,10 @@ app.post('/api/import-excel', upload.single('excel'), (req, res) => {
         id: maxId + colIndex + 1,
         name: String(categoryName).trim(),
         boulders: [
-          { boulderId: 1, climbers: [...climbers], currentClimberIndex: 0, held: false },
-          { boulderId: 2, climbers: [...climbers], currentClimberIndex: 0, held: false },
-          { boulderId: 3, climbers: [...climbers], currentClimberIndex: 0, held: false },
-          { boulderId: 4, climbers: [...climbers], currentClimberIndex: 0, held: false }
+          { boulderId: 1, climbers: [...climbers], currentClimberIndex: 0, held: false, hasStarted: false },
+          { boulderId: 2, climbers: [...climbers], currentClimberIndex: 0, held: false, hasStarted: false },
+          { boulderId: 3, climbers: [...climbers], currentClimberIndex: 0, held: false, hasStarted: false },
+          { boulderId: 4, climbers: [...climbers], currentClimberIndex: 0, held: false, hasStarted: false }
         ],
         climberProgress: {}
       };
@@ -265,6 +265,17 @@ function getNextActiveClimberIndex(boulder, category, startIndex) {
 // Advance a single boulder, recording progress and skipping completed climbers
 function advanceBoulder(boulder, category) {
   if (boulder.held || !boulder.climbers || boulder.climbers.length === 0) return;
+
+  // If boulder hasn't started yet, just mark it as started (first climber becomes active)
+  if (!boulder.hasStarted) {
+    boulder.hasStarted = true;
+    // Record that first climber is now on this boulder
+    const firstClimber = boulder.climbers[boulder.currentClimberIndex];
+    if (firstClimber) {
+      recordClimberProgress(category, firstClimber, boulder.boulderId);
+    }
+    return;
+  }
 
   // Record that current climber has climbed this boulder
   const currentClimber = boulder.climbers[boulder.currentClimberIndex];
@@ -537,9 +548,10 @@ io.on('connection', (socket) => {
       if (category) {
         // Reset climber progress tracking
         category.climberProgress = {};
-        // Reset all boulder indices to 0
+        // Reset all boulder indices to 0 and hasStarted to false
         category.boulders.forEach(boulder => {
           boulder.currentClimberIndex = 0;
+          boulder.hasStarted = false;
         });
         console.log(`[${new Date().toISOString()}] Category progress reset by ${clientId}: ${category.name}`);
         io.emit('categories-sync', timerState.categories);

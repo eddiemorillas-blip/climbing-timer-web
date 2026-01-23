@@ -567,11 +567,8 @@ io.on('connection', (socket) => {
         const boulderIndex = category.boulders.findIndex(b => b.boulderId === boulderId);
         const boulder = category.boulders[boulderIndex];
         if (boulder && boulder.hasStarted) {
-          // Advance this boulder (skip current climber - they'll come back around)
-          const nextIndex = (boulder.currentClimberIndex + 1) % boulder.climbers.length;
-          boulder.currentClimberIndex = getNextActiveClimberIndex(boulder, category, nextIndex);
-
-          // Set next boulder to show empty (the skip flows through)
+          // Don't advance this boulder - climber stays in position
+          // Just set next boulder to show empty (the skip flows through)
           if (boulderIndex < category.boulders.length - 1) {
             category.boulders[boulderIndex + 1].skipNext = true;
           }

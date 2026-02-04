@@ -155,6 +155,17 @@
           </div>
         </div>
 
+        <!-- Display Options -->
+        <div class="flex items-center justify-between mb-3 pt-2 border-t border-gray-700">
+          <h3 class="text-xs font-semibold text-gray-400">Display</h3>
+          <div class="flex items-center gap-2">
+            <span class="text-xs text-gray-300">Show Names</span>
+            <button type="button" id="showNamesToggle" data-checked="true" class="relative w-9 h-5 bg-green-500 rounded-full transition-colors focus:outline-none" onclick="this.dataset.checked = this.dataset.checked === 'true' ? 'false' : 'true'; this.style.backgroundColor = this.dataset.checked === 'true' ? '#22c55e' : '#4b5563'; this.querySelector('span').style.transform = this.dataset.checked === 'true' ? 'translateX(16px)' : 'translateX(0)'; this.dispatchEvent(new Event('change'));">
+              <span class="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full transition-transform" style="transform: translateX(16px);"></span>
+            </button>
+          </div>
+        </div>
+
         <!-- Category Management -->
         <div class="flex items-center justify-between mb-2">
           <h3 class="text-xs font-semibold text-gray-400">Categories</h3>
@@ -212,6 +223,7 @@
       phase: 'stopped',
       running: false,
       remaining: 240,
+      showNames: true,
       intervalId: null,
       audioCtx: null,
       masterGain: null,
@@ -473,6 +485,14 @@
       state.climbSec = config.climbSec;
       state.transMin = config.transMin;
       state.transSec = config.transSec;
+      if (typeof config.showNames === 'boolean') {
+        state.showNames = config.showNames;
+        const toggle = document.getElementById('showNamesToggle');
+        toggle.dataset.checked = config.showNames.toString();
+        toggle.style.backgroundColor = config.showNames ? '#22c55e' : '#4b5563';
+        toggle.querySelector('span').style.transform = config.showNames ? 'translateX(16px)' : 'translateX(0)';
+        renderClimberGrid();
+      }
 
       document.getElementById('climbMin').value = config.climbMin;
       document.getElementById('climbSec').value = config.climbSec;
@@ -610,7 +630,7 @@
     function renderClimberGrid() {
       const grid = document.getElementById('climberGrid');
 
-      if (state.categories.length === 0) {
+      if (!state.showNames || state.categories.length === 0) {
         grid.style.display = 'none';
         return;
       }
@@ -754,6 +774,21 @@
           climbSec: state.climbSec,
           transMin: state.transMin,
           transSec: state.transSec
+        });
+      }
+    });
+
+    // --- Wire show names toggle ---
+    document.getElementById('showNamesToggle').addEventListener('change', (e) => {
+      state.showNames = e.target.dataset.checked === 'true';
+      renderClimberGrid();
+      if (!state.syncInProgress) {
+        socket.emit('config-update', {
+          climbMin: state.climbMin,
+          climbSec: state.climbSec,
+          transMin: state.transMin,
+          transSec: state.transSec,
+          showNames: state.showNames
         });
       }
     });

@@ -182,6 +182,7 @@ let timerState = {
   phase: 'stopped',
   running: false,
   remaining: 240,
+  showNames: true,
   categories: loadCategories()
   // categories structure:
   // [
@@ -390,6 +391,13 @@ io.on('connection', (socket) => {
 
   // Send the current timer state to the newly connected client
   socket.emit('timer-sync', timerState);
+  socket.emit('config-sync', {
+    climbMin: timerState.climbMin,
+    climbSec: timerState.climbSec,
+    transMin: timerState.transMin,
+    transSec: timerState.transSec,
+    showNames: timerState.showNames
+  });
   socket.emit('categories-sync', timerState.categories);
 
   // Broadcast the updated client count to all clients
@@ -432,11 +440,20 @@ io.on('connection', (socket) => {
         timerState.climbSec = config.climbSec;
         timerState.transMin = config.transMin;
         timerState.transSec = config.transSec;
+        if (typeof config.showNames === 'boolean') {
+          timerState.showNames = config.showNames;
+        }
 
-        // Broadcast config changes to all other clients
-        socket.broadcast.emit('config-sync', config);
+        // Broadcast config changes to ALL clients (including display screens)
+        io.emit('config-sync', {
+          climbMin: timerState.climbMin,
+          climbSec: timerState.climbSec,
+          transMin: timerState.transMin,
+          transSec: timerState.transSec,
+          showNames: timerState.showNames
+        });
 
-        console.log(`[${new Date().toISOString()}] Config updated by ${clientId}: climb=${config.climbMin}:${config.climbSec}`);
+        console.log(`[${new Date().toISOString()}] Config updated by ${clientId}: climb=${config.climbMin}:${config.climbSec}, showNames=${timerState.showNames}`);
       }
     } catch (error) {
       console.error(`[${new Date().toISOString()}] Error updating config:`, error);

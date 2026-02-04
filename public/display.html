@@ -211,6 +211,7 @@
     const state = {
       phase: 'stopped',
       remaining: 240,
+      showNames: true,
       categories: []
     };
 
@@ -250,7 +251,18 @@
     socket.on('timer-sync', (serverState) => {
       state.phase = serverState.phase;
       state.remaining = serverState.remaining;
+      if (typeof serverState.showNames === 'boolean') {
+        state.showNames = serverState.showNames;
+        renderClimberGrid();
+      }
       updateDisplay();
+    });
+
+    socket.on('config-sync', (config) => {
+      if (typeof config.showNames === 'boolean') {
+        state.showNames = config.showNames;
+        renderClimberGrid();
+      }
     });
 
     socket.on('categories-sync', (categories) => {
@@ -260,6 +272,18 @@
 
     function renderClimberGrid() {
       const grid = document.getElementById('climberGrid');
+      const climberSection = document.querySelector('.climber-section');
+      const timerSection = document.querySelector('.timer-section');
+
+      // Hide climber section if showNames is off
+      if (!state.showNames) {
+        climberSection.style.display = 'none';
+        timerSection.style.flex = '1';
+        return;
+      } else {
+        climberSection.style.display = 'flex';
+        timerSection.style.flex = '7';
+      }
 
       if (state.categories.length === 0) {
         grid.innerHTML = '<div class="text-center text-gray-500 text-2xl w-full">No categories configured</div>';

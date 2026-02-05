@@ -25,6 +25,7 @@ const DATA_DIR = path.join(__dirname, 'data');
 const CATEGORIES_FILE = path.join(DATA_DIR, 'categories.json');
 
 // Load categories from JSON file on startup
+// Returns { rounds, activeRoundIndex } structure
 function loadCategories() {
   try {
     if (!fs.existsSync(DATA_DIR)) {
@@ -32,24 +33,42 @@ function loadCategories() {
     }
     if (fs.existsSync(CATEGORIES_FILE)) {
       const data = fs.readFileSync(CATEGORIES_FILE, 'utf8');
-      const categories = JSON.parse(data);
-      console.log(`[${new Date().toISOString()}] Loaded ${categories.length} categories from ${CATEGORIES_FILE}`);
-      return categories;
+      const parsed = JSON.parse(data);
+
+      // Check if it's old format (array of categories) or new format (object with rounds)
+      if (Array.isArray(parsed)) {
+        // Migrate old format to new format
+        console.log(`[${new Date().toISOString()}] Migrating old categories format to rounds format`);
+        const rounds = parsed.length > 0 ? [{ name: 'Round 1', categories: parsed }] : [];
+        console.log(`[${new Date().toISOString()}] Loaded ${rounds.length} rounds from ${CATEGORIES_FILE} (migrated)`);
+        return { rounds, activeRoundIndex: 0 };
+      } else {
+        // New format with rounds
+        console.log(`[${new Date().toISOString()}] Loaded ${parsed.rounds?.length || 0} rounds from ${CATEGORIES_FILE}`);
+        return {
+          rounds: parsed.rounds || [],
+          activeRoundIndex: parsed.activeRoundIndex || 0
+        };
+      }
     }
   } catch (error) {
     console.error(`[${new Date().toISOString()}] Error loading categories:`, error);
   }
-  return [];
+  return { rounds: [], activeRoundIndex: 0 };
 }
 
-// Save categories to JSON file
+// Save categories to JSON file (new rounds format)
 function saveCategories() {
   try {
     if (!fs.existsSync(DATA_DIR)) {
       fs.mkdirSync(DATA_DIR, { recursive: true });
     }
-    fs.writeFileSync(CATEGORIES_FILE, JSON.stringify(timerState.categories, null, 2));
-    console.log(`[${new Date().toISOString()}] Saved ${timerState.categories.length} categories to ${CATEGORIES_FILE}`);
+    const dataToSave = {
+      rounds: timerState.rounds,
+      activeRoundIndex: timerState.activeRoundIndex
+    };
+    fs.writeFileSync(CATEGORIES_FILE, JSON.stringify(dataToSave, null, 2));
+    console.log(`[${new Date().toISOString()}] Saved ${timerState.rounds.length} rounds to ${CATEGORIES_FILE}`);
   } catch (error) {
     console.error(`[${new Date().toISOString()}] Error saving categories:`, error);
   }
@@ -90,7 +109,7 @@ app.get('/api/state', (req, res) => {
 });
 
 // API endpoint to import climbers from Excel
-// Excel format: Column headers = category names, rows = climber names
+// Excel format: Each sheet = one round. Column headers = category names, rows = climber names
 app.post('/api/import-excel', upload.single('excel'), (req, res) => {
   try {
     if (!req.file) {
@@ -99,72 +118,99 @@ app.post('/api/import-excel', upload.single('excel'), (req, res) => {
 
     // Parse Excel file from buffer
     const workbook = XLSX.read(req.file.buffer, { type: 'buffer' });
-    const sheetName = workbook.SheetNames[0];
-    const worksheet = workbook.Sheets[sheetName];
 
-    // Convert to JSON with headers as first row
-    const data = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+    // Process ALL sheets - each sheet becomes a round
+    const newRounds = [];
+    let globalCategoryId = 1;
 
-    if (data.length < 2) {
-      return res.status(400).json({ error: 'Excel file must have headers and at least one climber' });
-    }
+    for (const sheetName of workbook.SheetNames) {
+      const worksheet = workbook.Sheets[sheetName];
 
-    // First row is headers (category names)
-    const headers = data[0].filter(h => h && String(h).trim());
+      // Convert to JSON with headers as first row
+      const data = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
 
-    if (headers.length === 0) {
-      return res.status(400).json({ error: 'No category names found in header row' });
-    }
-
-    if (headers.length > 4) {
-      return res.status(400).json({ error: 'Maximum 4 categories allowed. Found: ' + headers.length });
-    }
-
-    // Build categories from columns
-    const newCategories = headers.map((categoryName, colIndex) => {
-      // Get climbers from this column (rows 1+)
-      const climbers = [];
-      for (let rowIndex = 1; rowIndex < data.length; rowIndex++) {
-        const cellValue = data[rowIndex][colIndex];
-        if (cellValue && String(cellValue).trim()) {
-          climbers.push(String(cellValue).trim());
-        }
+      if (data.length < 2) {
+        // Skip empty sheets
+        continue;
       }
 
-      // Generate new ID
-      const maxId = timerState.categories.length > 0
-        ? Math.max(...timerState.categories.map(c => c.id))
-        : 0;
+      // First row is headers (category names)
+      const headers = data[0].filter(h => h && String(h).trim());
 
-      // All boulders start with climber index 0 - climbers progress B1 -> B2 -> B3 -> B4
-      return {
-        id: maxId + colIndex + 1,
-        name: String(categoryName).trim(),
-        boulders: [
-          { boulderId: 1, climbers: [...climbers], currentClimberIndex: 0, skipNext: false, hasStarted: false },
-          { boulderId: 2, climbers: [...climbers], currentClimberIndex: 0, skipNext: false, hasStarted: false },
-          { boulderId: 3, climbers: [...climbers], currentClimberIndex: 0, skipNext: false, hasStarted: false },
-          { boulderId: 4, climbers: [...climbers], currentClimberIndex: 0, skipNext: false, hasStarted: false }
-        ],
-        climberProgress: {}
-      };
-    });
+      if (headers.length === 0) {
+        // Skip sheets without category headers
+        continue;
+      }
 
-    // Replace existing categories with imported ones
-    timerState.categories = newCategories;
+      if (headers.length > 4) {
+        return res.status(400).json({ error: `Sheet "${sheetName}": Maximum 4 categories allowed. Found: ${headers.length}` });
+      }
+
+      // Build categories from columns for this sheet
+      const roundCategories = headers.map((categoryName, colIndex) => {
+        // Get climbers from this column (rows 1+)
+        const climbers = [];
+        for (let rowIndex = 1; rowIndex < data.length; rowIndex++) {
+          const cellValue = data[rowIndex][colIndex];
+          if (cellValue && String(cellValue).trim()) {
+            climbers.push(String(cellValue).trim());
+          }
+        }
+
+        // All boulders start with climber index 0 - climbers progress B1 -> B2 -> B3 -> B4
+        return {
+          id: globalCategoryId++,
+          name: String(categoryName).trim(),
+          boulders: [
+            { boulderId: 1, climbers: [...climbers], currentClimberIndex: 0, skipNext: false, hasStarted: false },
+            { boulderId: 2, climbers: [...climbers], currentClimberIndex: 0, skipNext: false, hasStarted: false },
+            { boulderId: 3, climbers: [...climbers], currentClimberIndex: 0, skipNext: false, hasStarted: false },
+            { boulderId: 4, climbers: [...climbers], currentClimberIndex: 0, skipNext: false, hasStarted: false }
+          ],
+          climberProgress: {}
+        };
+      });
+
+      // Add this round (use "Round X" naming instead of sheet name)
+      newRounds.push({
+        name: `Round ${newRounds.length + 1}`,
+        categories: roundCategories
+      });
+    }
+
+    if (newRounds.length === 0) {
+      return res.status(400).json({ error: 'No valid sheets found. Each sheet must have headers and at least one climber.' });
+    }
+
+    // Update state with new rounds
+    timerState.rounds = newRounds;
+    timerState.activeRoundIndex = 0;
+    timerState.categories = newRounds[0].categories;
 
     // Save and broadcast to all clients
     saveCategories();
+    io.emit('rounds-sync', {
+      rounds: timerState.rounds.map(r => ({ name: r.name, categoryCount: r.categories.length })),
+      activeRoundIndex: timerState.activeRoundIndex
+    });
     io.emit('categories-sync', timerState.categories);
 
-    const totalClimbers = newCategories.reduce((sum, cat) => sum + (cat.boulders[0]?.climbers?.length || 0), 0);
-    console.log(`[${new Date().toISOString()}] Imported ${newCategories.length} categories with ${totalClimbers} total climbers from Excel`);
+    const totalClimbers = newRounds.reduce((sum, round) =>
+      sum + round.categories.reduce((catSum, cat) => catSum + (cat.boulders[0]?.climbers?.length || 0), 0)
+    , 0);
+    const totalCategories = newRounds.reduce((sum, round) => sum + round.categories.length, 0);
+
+    console.log(`[${new Date().toISOString()}] Imported ${newRounds.length} rounds with ${totalCategories} categories and ${totalClimbers} total climbers from Excel`);
 
     res.json({
       success: true,
-      categoriesCreated: newCategories.length,
+      roundsCreated: newRounds.length,
+      categoriesCreated: totalCategories,
       totalClimbers: totalClimbers,
-      categories: newCategories.map(c => ({ name: c.name, climberCount: c.boulders[0]?.climbers?.length || 0 }))
+      rounds: newRounds.map(r => ({
+        name: r.name,
+        categories: r.categories.map(c => ({ name: c.name, climberCount: c.boulders[0]?.climbers?.length || 0 }))
+      }))
     });
 
   } catch (error) {
@@ -174,6 +220,7 @@ app.post('/api/import-excel', upload.single('excel'), (req, res) => {
 });
 
 // Store the current timer state on the server
+const loadedData = loadCategories();
 let timerState = {
   climbMin: 4,
   climbSec: 0,
@@ -183,7 +230,11 @@ let timerState = {
   running: false,
   remaining: 240,
   showNames: true,
-  categories: loadCategories()
+  // Multi-round support
+  rounds: loadedData.rounds,
+  activeRoundIndex: loadedData.activeRoundIndex,
+  // categories is derived from the active round
+  categories: loadedData.rounds[loadedData.activeRoundIndex]?.categories || []
   // categories structure:
   // [
   //   {
@@ -398,6 +449,11 @@ io.on('connection', (socket) => {
     transSec: timerState.transSec,
     showNames: timerState.showNames
   });
+  // Send rounds info for multi-round navigation
+  socket.emit('rounds-sync', {
+    rounds: timerState.rounds.map(r => ({ name: r.name, categoryCount: r.categories.length })),
+    activeRoundIndex: timerState.activeRoundIndex
+  });
   socket.emit('categories-sync', timerState.categories);
 
   // Broadcast the updated client count to all clients
@@ -476,6 +532,14 @@ io.on('connection', (socket) => {
           console.log(`[${new Date().toISOString()}] Category added by ${clientId}: ${category.name}`);
         }
 
+        // Ensure active round exists, create if needed
+        if (timerState.rounds.length === 0) {
+          timerState.rounds.push({ name: 'Round 1', categories: [] });
+          timerState.activeRoundIndex = 0;
+        }
+        // Sync categories back to the active round
+        timerState.rounds[timerState.activeRoundIndex].categories = timerState.categories;
+
         // Broadcast to all clients
         io.emit('categories-sync', timerState.categories);
         saveCategories();
@@ -492,6 +556,10 @@ io.on('connection', (socket) => {
       timerState.categories = timerState.categories.filter(c => c.id !== categoryId);
 
       if (timerState.categories.length < initialLength) {
+        // Sync categories back to the active round
+        if (timerState.rounds.length > 0) {
+          timerState.rounds[timerState.activeRoundIndex].categories = timerState.categories;
+        }
         console.log(`[${new Date().toISOString()}] Category deleted by ${clientId}: ID ${categoryId}`);
         io.emit('categories-sync', timerState.categories);
         saveCategories();
@@ -619,6 +687,46 @@ io.on('connection', (socket) => {
       }
     } catch (error) {
       console.error(`[${new Date().toISOString()}] Error resetting category progress:`, error);
+    }
+  });
+
+  // Listen for round switch (multi-round navigation)
+  socket.on('switch-round', (roundIndex) => {
+    try {
+      const newIndex = parseInt(roundIndex);
+      if (isNaN(newIndex) || newIndex < 0 || newIndex >= timerState.rounds.length) {
+        console.log(`[${new Date().toISOString()}] Invalid round index: ${roundIndex}`);
+        return;
+      }
+
+      // Update active round index
+      timerState.activeRoundIndex = newIndex;
+
+      // Reset all category progress in the new round (fresh start)
+      const newRound = timerState.rounds[newIndex];
+      newRound.categories.forEach(category => {
+        category.climberProgress = {};
+        category.boulders.forEach(boulder => {
+          boulder.currentClimberIndex = 0;
+          boulder.hasStarted = false;
+          boulder.skipNext = false;
+        });
+      });
+
+      // Update categories from active round
+      timerState.categories = newRound.categories;
+
+      console.log(`[${new Date().toISOString()}] Switched to round ${newIndex + 1} (${newRound.name}) by ${clientId}`);
+
+      // Broadcast to all clients
+      io.emit('rounds-sync', {
+        rounds: timerState.rounds.map(r => ({ name: r.name, categoryCount: r.categories.length })),
+        activeRoundIndex: timerState.activeRoundIndex
+      });
+      io.emit('categories-sync', timerState.categories);
+      saveCategories();
+    } catch (error) {
+      console.error(`[${new Date().toISOString()}] Error switching round:`, error);
     }
   });
 

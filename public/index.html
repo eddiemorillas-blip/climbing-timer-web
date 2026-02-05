@@ -169,6 +169,12 @@
         <!-- Category Management -->
         <div class="flex items-center justify-between mb-2">
           <h3 class="text-xs font-semibold text-gray-400">Categories</h3>
+          <!-- Round Navigation -->
+          <div id="roundNavigation" class="flex items-center gap-1" style="display: none;">
+            <button id="prevRoundBtn" class="px-2 py-1 rounded bg-gray-700 hover:bg-gray-600 text-white text-xs font-semibold disabled:opacity-50 disabled:cursor-not-allowed">&lt; Prev</button>
+            <span id="roundLabel" class="text-xs text-gray-300 px-2">Round 1 of 1</span>
+            <button id="nextRoundBtn" class="px-2 py-1 rounded bg-gray-700 hover:bg-gray-600 text-white text-xs font-semibold disabled:opacity-50 disabled:cursor-not-allowed">Next &gt;</button>
+          </div>
           <div class="flex gap-1">
             <label class="px-2 py-1 rounded bg-purple-600 hover:bg-purple-700 text-white text-xs font-semibold cursor-pointer">
               Excel
@@ -231,7 +237,9 @@
       syncInProgress: false,  // Flag to prevent sync loops
       lastPhaseChangeTime: 0,  // Track when we last changed phase
       categories: [],  // Categories with climbers for 4 boulders
-      expandedCategories: {}  // Track which categories are expanded
+      expandedCategories: {},  // Track which categories are expanded
+      rounds: [],  // Multi-round support: [{ name: "Round 1", categoryCount: 2 }, ...]
+      activeRoundIndex: 0  // Current active round
     };
 
     function ensureAudio(){
@@ -513,6 +521,35 @@
       renderCategoriesList();
       renderClimberGrid();
     });
+
+    // --- Listen for rounds updates from server ---
+    socket.on('rounds-sync', (data) => {
+      state.rounds = data.rounds || [];
+      state.activeRoundIndex = data.activeRoundIndex || 0;
+      updateRoundNavigation();
+    });
+
+    // Update round navigation UI
+    function updateRoundNavigation() {
+      const navEl = document.getElementById('roundNavigation');
+      const labelEl = document.getElementById('roundLabel');
+      const prevBtn = document.getElementById('prevRoundBtn');
+      const nextBtn = document.getElementById('nextRoundBtn');
+
+      if (state.rounds.length <= 1) {
+        // Hide navigation when there's only 0 or 1 round
+        navEl.style.display = 'none';
+        return;
+      }
+
+      navEl.style.display = 'flex';
+      const currentRound = state.rounds[state.activeRoundIndex];
+      labelEl.textContent = `${currentRound?.name || 'Round ' + (state.activeRoundIndex + 1)} (${state.activeRoundIndex + 1}/${state.rounds.length})`;
+
+      // Update button states
+      prevBtn.disabled = state.activeRoundIndex === 0;
+      nextBtn.disabled = state.activeRoundIndex >= state.rounds.length - 1;
+    }
 
     // --- Category Management Functions ---
     function renderCategoriesList() {
@@ -796,6 +833,19 @@
     // --- Wire category management controls ---
     document.getElementById('addCategoryBtn').addEventListener('click', addCategory);
 
+    // --- Wire round navigation ---
+    document.getElementById('prevRoundBtn').addEventListener('click', () => {
+      if (state.activeRoundIndex > 0) {
+        socket.emit('switch-round', state.activeRoundIndex - 1);
+      }
+    });
+
+    document.getElementById('nextRoundBtn').addEventListener('click', () => {
+      if (state.activeRoundIndex < state.rounds.length - 1) {
+        socket.emit('switch-round', state.activeRoundIndex + 1);
+      }
+    });
+
     // --- Excel Import Handler ---
     document.getElementById('excelFileInput').addEventListener('change', async (e) => {
       const file = e.target.files[0];
@@ -817,7 +867,11 @@
         }
 
         const result = await response.json();
-        alert(`Successfully imported ${result.categoriesCreated} categories with ${result.totalClimbers} total climbers.`);
+        if (result.roundsCreated > 1) {
+          alert(`Successfully imported ${result.roundsCreated} rounds with ${result.categoriesCreated} categories and ${result.totalClimbers} total climbers.`);
+        } else {
+          alert(`Successfully imported ${result.categoriesCreated} categories with ${result.totalClimbers} total climbers.`);
+        }
       } catch (error) {
         console.error('Import error:', error);
         alert('Failed to import Excel file. Please check the file format.');
@@ -831,6 +885,7 @@
     updateDisplay();
     renderCategoriesList();
     renderClimberGrid();
+    updateRoundNavigation();
   </script>
 </body>
 </html>

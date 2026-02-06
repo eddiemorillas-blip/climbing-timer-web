@@ -43,10 +43,14 @@ function loadCategories() {
         console.log(`[${new Date().toISOString()}] Loaded ${rounds.length} rounds from ${CATEGORIES_FILE} (migrated)`);
         return { rounds, activeRoundIndex: 0 };
       } else {
-        // New format with rounds
-        console.log(`[${new Date().toISOString()}] Loaded ${parsed.rounds?.length || 0} rounds from ${CATEGORIES_FILE}`);
+        // New format with rounds - ensure each round has a categories array
+        const validRounds = (parsed.rounds || []).map(r => ({
+          ...r,
+          categories: r.categories || []
+        }));
+        console.log(`[${new Date().toISOString()}] Loaded ${validRounds.length} rounds from ${CATEGORIES_FILE}`);
         return {
-          rounds: parsed.rounds || [],
+          rounds: validRounds,
           activeRoundIndex: parsed.activeRoundIndex || 0
         };
       }
@@ -190,7 +194,7 @@ app.post('/api/import-excel', upload.single('excel'), (req, res) => {
     // Save and broadcast to all clients
     saveCategories();
     io.emit('rounds-sync', {
-      rounds: timerState.rounds.map(r => ({ name: r.name, categoryCount: r.categories.length })),
+      rounds: timerState.rounds.map(r => ({ name: r.name, categoryCount: r.categories?.length || 0 })),
       activeRoundIndex: timerState.activeRoundIndex
     });
     io.emit('categories-sync', timerState.categories);
@@ -451,7 +455,7 @@ io.on('connection', (socket) => {
   });
   // Send rounds info for multi-round navigation
   socket.emit('rounds-sync', {
-    rounds: timerState.rounds.map(r => ({ name: r.name, categoryCount: r.categories.length })),
+    rounds: timerState.rounds.map(r => ({ name: r.name, categoryCount: r.categories?.length || 0 })),
     activeRoundIndex: timerState.activeRoundIndex
   });
   socket.emit('categories-sync', timerState.categories);
@@ -720,7 +724,7 @@ io.on('connection', (socket) => {
 
       // Broadcast to all clients
       io.emit('rounds-sync', {
-        rounds: timerState.rounds.map(r => ({ name: r.name, categoryCount: r.categories.length })),
+        rounds: timerState.rounds.map(r => ({ name: r.name, categoryCount: r.categories?.length || 0 })),
         activeRoundIndex: timerState.activeRoundIndex
       });
       io.emit('categories-sync', timerState.categories);

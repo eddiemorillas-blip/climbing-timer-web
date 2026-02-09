@@ -152,6 +152,19 @@
     }
     .status-connected { background-color: #22c55e; }
     .status-disconnected { background-color: #ef4444; }
+
+    /* Room indicator */
+    .room-indicator {
+      position: fixed;
+      bottom: 1vw;
+      left: 1vw;
+      font-size: 1vw;
+      opacity: 0.4;
+      z-index: 1000;
+      background: rgba(255, 255, 255, 0.1);
+      padding: 0.3vw 0.6vw;
+      border-radius: 0.3vw;
+    }
   </style>
 </head>
 <body>
@@ -163,6 +176,9 @@
     <span class="status-dot status-disconnected" id="statusDot"></span>
     <span id="connectionStatus">Connecting...</span>
   </div>
+
+  <!-- Room Indicator -->
+  <div class="room-indicator" id="roomIndicator">Room: default</div>
 
   <div class="display-container">
     <!-- Timer Section (70%) -->
@@ -194,8 +210,24 @@
       }
     });
 
-    // --- Socket.IO Connection ---
-    const socket = io();
+    // --- Room ID from URL ---
+    function getRoomId() {
+      const params = new URLSearchParams(window.location.search);
+      return params.get('room') || 'default';
+    }
+
+    const currentRoomId = getRoomId();
+
+    // Update room indicator
+    document.getElementById('roomIndicator').textContent = `Room: ${currentRoomId}`;
+
+    // --- Socket.IO Connection with Room ---
+    const socket = io({
+      query: {
+        room: currentRoomId,
+        type: 'display'
+      }
+    });
 
     socket.on('connect', () => {
       document.getElementById('statusDot').className = 'status-dot status-connected';
@@ -205,6 +237,12 @@
     socket.on('disconnect', () => {
       document.getElementById('statusDot').className = 'status-dot status-disconnected';
       document.getElementById('connectionStatus').textContent = 'Disconnected';
+    });
+
+    socket.on('room-deleted', () => {
+      // Room was deleted, show message
+      document.getElementById('roomIndicator').textContent = 'Room deleted';
+      document.getElementById('roomIndicator').style.color = '#ef4444';
     });
 
     // --- App State ---

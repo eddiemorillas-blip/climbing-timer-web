@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Climbing Timer - Admin Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    .status-dot {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      margin-right: 6px;
+    }
+    .status-running { background-color: #22c55e; }
+    .status-stopped { background-color: #6b7280; }
+    .status-transition { background-color: #f59e0b; }
+  </style>
+</head>
+<body class="bg-black text-white min-h-screen">
+  <div class="max-w-6xl mx-auto p-6">
+    <header class="mb-6 flex items-center justify-between">
+      <h1 class="text-2xl font-bold">Admin Dashboard</h1>
+      <div class="flex gap-2">
+        <button id="refreshBtn" class="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold">Refresh</button>
+        <a href="/index.html" class="px-4 py-2 rounded-lg bg-gray-600 hover:bg-gray-700 text-white font-semibold">Operator View</a>
+      </div>
+    </header>
+
+    <!-- Create Room Section -->
+    <div class="bg-gray-900 rounded-xl p-4 mb-6">
+      <h2 class="text-lg font-semibold mb-3">Create New Room</h2>
+      <div class="flex gap-3 items-end">
+        <div class="flex-1">
+          <label class="text-gray-400 text-sm block mb-1">Room ID</label>
+          <input type="text" id="newRoomId" placeholder="e.g., gym-a, competition-1" class="w-full px-3 py-2 rounded-lg bg-gray-800 border border-gray-700 text-white" />
+        </div>
+        <button id="createRoomBtn" class="px-6 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-white font-semibold">Create Room</button>
+      </div>
+      <div id="createRoomError" class="text-red-500 text-sm mt-2" style="display: none;"></div>
+      <div id="createRoomSuccess" class="text-green-500 text-sm mt-2" style="display: none;"></div>
+    </div>
+
+    <!-- Rooms List -->
+    <div class="bg-gray-900 rounded-xl p-4">
+      <h2 class="text-lg font-semibold mb-3">Active Rooms</h2>
+      <div id="roomsList" class="space-y-3">
+        <p class="text-gray-500">Loading rooms...</p>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    async function fetchRooms() {
+      try {
+        const response = await fetch('/api/rooms');
+        const data = await response.json();
+        renderRooms(data.rooms);
+      } catch (error) {
+        console.error('Error fetching rooms:', error);
+        document.getElementById('roomsList').innerHTML = '<p class="text-red-500">Failed to load rooms</p>';
+      }
+    }
+
+    function renderRooms(rooms) {
+      const container = document.getElementById('roomsList');
+
+      if (rooms.length === 0) {
+        container.innerHTML = '<p class="text-gray-500">No active rooms</p>';
+        return;
+      }
+
+      container.innerHTML = rooms.map(room => {
+        const statusClass = room.running ? 'status-running' : (room.phase === 'transition' ? 'status-transition' : 'status-stopped');
+        const statusText = room.running ? 'Running' : (room.phase === 'stopped' ? 'Stopped' : 'Paused');
+
+        return `
+          <div class="bg-gray-800 rounded-lg p-4 flex items-center justify-between">
+            <div class="flex-1">
+              <div class="flex items-center gap-3">
+                <span class="text-lg font-semibold">${room.id}</span>
+              </div>
+              <div class="text-gray-400 text-sm mt-1">
+                <span class="status-dot ${statusClass}"></span>
+                ${statusText}
+                &nbsp;|&nbsp;
+                ${room.connectedClients} client${room.connectedClients !== 1 ? 's' : ''}
+                &nbsp;|&nbsp;
+                ${room.categoriesCount} categories
+                &nbsp;|&nbsp;
+                ${room.roundsCount} rounds
+              </div>
+            </div>
+            <div class="flex gap-2">
+              <a href="/index.html?room=${encodeURIComponent(room.id)}" class="px-3 py-1.5 rounded bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold">Operator</a>
+              <a href="/display.html?room=${encodeURIComponent(room.id)}" target="_blank" class="px-3 py-1.5 rounded bg-green-600 hover:bg-green-700 text-white text-sm font-semibold">Display</a>
+              ${rooms.length > 1 ? `<button class="delete-room-btn px-3 py-1.5 rounded bg-red-600 hover:bg-red-700 text-white text-sm font-semibold" data-room-id="${room.id}">Delete</button>` : ''}
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      // Wire up delete buttons
+      document.querySelectorAll('.delete-room-btn').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+          const roomId = e.target.dataset.roomId;
+
+          if (!confirm(`Are you sure you want to delete room "${roomId}"?`)) return;
+
+          try {
+            const response = await fetch(`/api/rooms/${encodeURIComponent(roomId)}`, {
+              method: 'DELETE'
+            });
+
+            if (response.ok) {
+              fetchRooms();
+            } else {
+              const data = await response.json();
+              alert(data.error || 'Failed to delete room');
+            }
+          } catch (error) {
+            console.error('Error deleting room:', error);
+            alert('Failed to delete room');
+          }
+        });
+      });
+    }
+
+    // Create room handler
+    document.getElementById('createRoomBtn').addEventListener('click', async () => {
+      const roomId = document.getElementById('newRoomId').value.trim();
+
+      const errorEl = document.getElementById('createRoomError');
+      const successEl = document.getElementById('createRoomSuccess');
+
+      errorEl.style.display = 'none';
+      successEl.style.display = 'none';
+
+      if (!roomId) {
+        errorEl.textContent = 'Room ID is required';
+        errorEl.style.display = 'block';
+        return;
+      }
+
+      try {
+        const response = await fetch('/api/rooms', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ roomId })
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+          successEl.textContent = `Room "${data.roomId}" created successfully!`;
+          successEl.style.display = 'block';
+          document.getElementById('newRoomId').value = '';
+          fetchRooms();
+        } else {
+          errorEl.textContent = data.error || 'Failed to create room';
+          errorEl.style.display = 'block';
+        }
+      } catch (error) {
+        console.error('Error creating room:', error);
+        errorEl.textContent = 'Failed to create room';
+        errorEl.style.display = 'block';
+      }
+    });
+
+    // Refresh button
+    document.getElementById('refreshBtn').addEventListener('click', fetchRooms);
+
+    // Initial load
+    fetchRooms();
+
+    // Auto-refresh every 10 seconds
+    setInterval(fetchRooms, 10000);
+  </script>
+</body>
+</html>

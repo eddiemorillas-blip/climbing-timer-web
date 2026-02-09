@@ -97,18 +97,116 @@
     .expand-btn.expanded {
       transform: rotate(180deg);
     }
+
+    /* Modal styling */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.8);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    }
+    .modal-content {
+      background: #1f2937;
+      border: 1px solid #374151;
+      border-radius: 0.75rem;
+      padding: 1.5rem;
+      max-width: 400px;
+      width: 90%;
+    }
+    .modal-content h2 {
+      font-size: 1.25rem;
+      font-weight: 600;
+      margin-bottom: 1rem;
+    }
+    .modal-content input {
+      width: 100%;
+      padding: 0.5rem;
+      margin-bottom: 1rem;
+      border-radius: 0.375rem;
+      border: 1px solid #4b5563;
+      background: #111827;
+      color: white;
+    }
+    .modal-content .error-message {
+      color: #ef4444;
+      font-size: 0.875rem;
+      margin-bottom: 0.5rem;
+    }
+
+    /* Room indicator badge */
+    .room-badge {
+      background: #3b82f6;
+      color: white;
+      padding: 0.25rem 0.5rem;
+      border-radius: 0.375rem;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+
   </style>
 </head>
 <body class="bg-black text-white">
+  <!-- Share Links Modal -->
+  <div id="shareModal" class="modal-overlay" style="display: none;">
+    <div class="modal-content">
+      <h2>Share Room</h2>
+      <div class="space-y-4">
+        <div>
+          <label class="text-gray-400 text-sm block mb-1">Operator Link (can control timer)</label>
+          <div class="flex gap-2">
+            <input type="text" id="operatorLinkInput" readonly class="flex-1 bg-gray-800 text-sm" />
+            <button id="copyOperatorLink" class="px-3 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg font-semibold text-sm">Copy</button>
+          </div>
+        </div>
+
+        <div>
+          <label class="text-gray-400 text-sm block mb-1">Display Link (view only, for projector)</label>
+          <div class="flex gap-2">
+            <input type="text" id="displayLinkInput" readonly class="flex-1 bg-gray-800 text-sm" />
+            <button id="copyDisplayLink" class="px-3 py-2 bg-green-600 hover:bg-green-700 rounded-lg font-semibold text-sm">Copy</button>
+          </div>
+        </div>
+
+        <button id="closeShareBtn" class="w-full px-4 py-2 bg-gray-600 hover:bg-gray-700 rounded-lg font-semibold">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Room Picker Modal (shown when visiting without a room) -->
+  <div id="roomPickerModal" class="modal-overlay" style="display: none;">
+    <div class="modal-content">
+      <h2>Climbing Timer</h2>
+      <p class="text-gray-400 text-sm mb-4">Create a new room to get started. Share the link to invite others.</p>
+
+      <div class="space-y-3">
+        <div>
+          <label class="text-gray-400 text-sm block mb-1">Room Name</label>
+          <input type="text" id="newRoomNameInput" placeholder="e.g., gym-a, competition-2024" class="w-full" />
+        </div>
+
+        <button id="createJoinRoomBtn" class="w-full px-4 py-2 bg-green-600 hover:bg-green-700 rounded-lg font-semibold">Create Room</button>
+      </div>
+
+      <p class="text-gray-500 text-xs mt-4 text-center">Have an invite link? Just open it directly.</p>
+    </div>
+  </div>
+
   <div class="max-w-4xl mx-auto p-3">
     <header class="mb-3 flex items-center justify-between">
-      <h1 class="text-xl font-bold">Climbing Timer - Operator</h1>
+      <div class="flex items-center gap-2">
+        <h1 class="text-xl font-bold">Climbing Timer</h1>
+        <span class="room-badge" id="roomBadge">default</span>
+      </div>
       <div class="flex gap-2 items-center">
         <div class="px-2 py-1 rounded-lg bg-white bg-opacity-10 text-white text-xs flex items-center">
           <span class="status-dot status-disconnected" id="statusDot"></span>
           <span id="connectionStatus">Connecting...</span>
         </div>
-        <button class="px-3 py-1 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold" id="openDisplayBtn" title="Open Display Window">Open Display</button>
+        <button class="px-2 py-1 rounded-lg bg-green-600 hover:bg-green-700 text-white text-xs font-semibold" id="shareBtn" title="Share Links">Share</button>
+        <button class="px-3 py-1 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold" id="openDisplayBtn" title="Open Display Window">Display</button>
       </div>
     </header>
 
@@ -198,15 +296,32 @@
   <script src="/socket.io/socket.io.js"></script>
 
   <script>
-    // --- Socket.IO Connection ---
-    const socket = io();
+    // --- Room ID from URL ---
+    function getRoomId() {
+      const params = new URLSearchParams(window.location.search);
+      return params.get('room') || 'default';
+    }
+
+    const currentRoomId = getRoomId();
+
+    // Update room badge in header
+    document.getElementById('roomBadge').textContent = currentRoomId;
+
+    // --- Socket.IO Connection with Room ---
+    const socket = io({
+      query: {
+        room: currentRoomId,
+        type: 'operator'
+      }
+    });
+
     let isConnected = false;
 
     socket.on('connect', () => {
       isConnected = true;
       document.getElementById('statusDot').className = 'status-dot status-connected';
       document.getElementById('connectionStatus').textContent = 'Connected';
-      console.log('Connected to server');
+      console.log('Connected to server, room:', currentRoomId);
     });
 
     socket.on('disconnect', () => {
@@ -217,8 +332,74 @@
     });
 
     socket.on('client-count', (count) => {
-      document.getElementById('clientCount').textContent = `Connected clients: ${count}`;
+      document.getElementById('clientCount').textContent = `Room clients: ${count}`;
     });
+
+    socket.on('room-deleted', () => {
+      alert('This room has been deleted.');
+      window.location.href = '/';
+    });
+
+    // --- Share Modal ---
+    function getShareLinks() {
+      const base = window.location.origin;
+      const operatorLink = `${base}/index.html?room=${encodeURIComponent(currentRoomId)}`;
+      const displayLink = `${base}/display.html?room=${encodeURIComponent(currentRoomId)}`;
+      return { operatorLink, displayLink };
+    }
+
+    document.getElementById('shareBtn').addEventListener('click', () => {
+      const { operatorLink, displayLink } = getShareLinks();
+      document.getElementById('operatorLinkInput').value = operatorLink;
+      document.getElementById('displayLinkInput').value = displayLink;
+      document.getElementById('shareModal').style.display = 'flex';
+    });
+
+    document.getElementById('closeShareBtn').addEventListener('click', () => {
+      document.getElementById('shareModal').style.display = 'none';
+    });
+
+    document.getElementById('copyOperatorLink').addEventListener('click', () => {
+      const input = document.getElementById('operatorLinkInput');
+      navigator.clipboard.writeText(input.value);
+      document.getElementById('copyOperatorLink').textContent = 'Copied!';
+      setTimeout(() => document.getElementById('copyOperatorLink').textContent = 'Copy', 1500);
+    });
+
+    document.getElementById('copyDisplayLink').addEventListener('click', () => {
+      const input = document.getElementById('displayLinkInput');
+      navigator.clipboard.writeText(input.value);
+      document.getElementById('copyDisplayLink').textContent = 'Copied!';
+      setTimeout(() => document.getElementById('copyDisplayLink').textContent = 'Copy', 1500);
+    });
+
+    // --- Room Picker (shown when visiting without explicit room) ---
+    function showRoomPicker() {
+      const modal = document.getElementById('roomPickerModal');
+      modal.style.display = 'flex';
+      document.getElementById('newRoomNameInput').focus();
+    }
+
+    document.getElementById('createJoinRoomBtn').addEventListener('click', () => {
+      const roomName = document.getElementById('newRoomNameInput').value.trim();
+      if (roomName) {
+        window.location.href = `/index.html?room=${encodeURIComponent(roomName)}`;
+      }
+    });
+
+    document.getElementById('newRoomNameInput').addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') {
+        const roomName = document.getElementById('newRoomNameInput').value.trim();
+        if (roomName) {
+          window.location.href = `/index.html?room=${encodeURIComponent(roomName)}`;
+        }
+      }
+    });
+
+    // Show room picker if visiting without a room parameter
+    if (!window.location.search.includes('room=')) {
+      showRoomPicker();
+    }
 
     // --- App State & Audio ---
     const state = {
@@ -481,7 +662,6 @@
       document.getElementById('transSec').value = state.transSec;
 
       updateDisplay();
-      refreshUiVisibility(true);
 
       state.syncInProgress = false;
     });
@@ -749,7 +929,10 @@
 
     // --- Open Display Window ---
     document.getElementById('openDisplayBtn').addEventListener('click', () => {
-      window.open('/display.html', 'timerDisplay', 'width=1920,height=1080');
+      const displayUrl = currentRoomId === 'default'
+        ? '/display.html'
+        : `/display.html?room=${encodeURIComponent(currentRoomId)}`;
+      window.open(displayUrl, 'timerDisplay', 'width=1920,height=1080');
     });
 
     // --- Wire controls ---
@@ -855,7 +1038,10 @@
       formData.append('excel', file);
 
       try {
-        const response = await fetch('/api/import-excel', {
+        const importUrl = currentRoomId === 'default'
+          ? '/api/import-excel'
+          : `/api/import-excel?room=${encodeURIComponent(currentRoomId)}`;
+        const response = await fetch(importUrl, {
           method: 'POST',
           body: formData
         });

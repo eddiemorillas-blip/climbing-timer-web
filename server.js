@@ -24,59 +24,191 @@ const upload = multer({
 const DATA_DIR = path.join(__dirname, 'data');
 const CATEGORIES_FILE = path.join(DATA_DIR, 'categories.json');
 
-// Load categories from JSON file on startup
-// Returns { rounds, activeRoundIndex } structure
-function loadCategories() {
-  try {
-    if (!fs.existsSync(DATA_DIR)) {
-      fs.mkdirSync(DATA_DIR, { recursive: true });
-    }
-    if (fs.existsSync(CATEGORIES_FILE)) {
-      const data = fs.readFileSync(CATEGORIES_FILE, 'utf8');
-      const parsed = JSON.parse(data);
+// --- Multi-Room Support ---
+const DEFAULT_ROOM = 'default';
+const rooms = new Map();
 
-      // Check if it's old format (array of categories) or new format (object with rounds)
-      if (Array.isArray(parsed)) {
-        // Migrate old format to new format
-        console.log(`[${new Date().toISOString()}] Migrating old categories format to rounds format`);
-        const rounds = parsed.length > 0 ? [{ name: 'Round 1', categories: parsed }] : [];
-        console.log(`[${new Date().toISOString()}] Loaded ${rounds.length} rounds from ${CATEGORIES_FILE} (migrated)`);
-        return { rounds, activeRoundIndex: 0 };
-      } else {
-        // New format with rounds - ensure each round has a categories array
-        const validRounds = (parsed.rounds || []).map(r => ({
-          ...r,
-          categories: r.categories || []
-        }));
-        console.log(`[${new Date().toISOString()}] Loaded ${validRounds.length} rounds from ${CATEGORIES_FILE}`);
-        return {
-          rounds: validRounds,
-          activeRoundIndex: parsed.activeRoundIndex || 0
-        };
-      }
-    }
-  } catch (error) {
-    console.error(`[${new Date().toISOString()}] Error loading categories:`, error);
-  }
-  return { rounds: [], activeRoundIndex: 0 };
+// Sanitize room ID to prevent path traversal and invalid characters
+function sanitizeRoomId(roomId) {
+  if (!roomId || typeof roomId !== 'string') return DEFAULT_ROOM;
+  // Only allow alphanumeric, hyphens, and underscores
+  const sanitized = roomId.replace(/[^a-zA-Z0-9_-]/g, '').substring(0, 50);
+  return sanitized || DEFAULT_ROOM;
 }
 
-// Save categories to JSON file (new rounds format)
-function saveCategories() {
+// Create default timer state for a new room
+function createRoomState() {
+  return {
+    timerState: {
+      climbMin: 4,
+      climbSec: 0,
+      transMin: 1,
+      transSec: 0,
+      phase: 'stopped',
+      running: false,
+      remaining: 240,
+      showNames: true,
+      rounds: [],
+      activeRoundIndex: 0,
+      categories: []
+    },
+    timerInterval: null,
+    connectedClients: 0,
+    lastActivity: Date.now()
+  };
+}
+
+// Get persistence file path for a room
+function getRoomDataFile(roomId) {
+  return path.join(DATA_DIR, `room_${roomId}.json`);
+}
+
+// Load room data from persistence
+function loadRoomData(roomId) {
+  try {
+    const filePath = getRoomDataFile(roomId);
+    if (fs.existsSync(filePath)) {
+      const data = fs.readFileSync(filePath, 'utf8');
+      const parsed = JSON.parse(data);
+      console.log(`[${new Date().toISOString()}] Loaded room data for "${roomId}"`);
+      return parsed;
+    }
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] Error loading room data for "${roomId}":`, error);
+  }
+  return null;
+}
+
+// Save room data to persistence
+function saveRoomData(roomId, room) {
   try {
     if (!fs.existsSync(DATA_DIR)) {
       fs.mkdirSync(DATA_DIR, { recursive: true });
     }
     const dataToSave = {
-      rounds: timerState.rounds,
-      activeRoundIndex: timerState.activeRoundIndex
+      rounds: room.timerState.rounds,
+      activeRoundIndex: room.timerState.activeRoundIndex
     };
-    fs.writeFileSync(CATEGORIES_FILE, JSON.stringify(dataToSave, null, 2));
-    console.log(`[${new Date().toISOString()}] Saved ${timerState.rounds.length} rounds to ${CATEGORIES_FILE}`);
+    fs.writeFileSync(getRoomDataFile(roomId), JSON.stringify(dataToSave, null, 2));
+    console.log(`[${new Date().toISOString()}] Saved room data for "${roomId}"`);
   } catch (error) {
-    console.error(`[${new Date().toISOString()}] Error saving categories:`, error);
+    console.error(`[${new Date().toISOString()}] Error saving room data for "${roomId}":`, error);
   }
 }
+
+// Get or create a room
+function getOrCreateRoom(roomId) {
+  if (!rooms.has(roomId)) {
+    const room = createRoomState();
+
+    // Try to load persisted data
+    const persistedData = loadRoomData(roomId);
+    if (persistedData) {
+      // Restore rounds from persistence
+      if (Array.isArray(persistedData.rounds)) {
+        room.timerState.rounds = persistedData.rounds.map(r => ({
+          ...r,
+          categories: r.categories || []
+        }));
+      }
+      room.timerState.activeRoundIndex = persistedData.activeRoundIndex || 0;
+      room.timerState.categories = room.timerState.rounds[room.timerState.activeRoundIndex]?.categories || [];
+    }
+
+    rooms.set(roomId, room);
+    console.log(`[${new Date().toISOString()}] Created room "${roomId}"`);
+  }
+  return rooms.get(roomId);
+}
+
+// Get list of all active rooms
+function getAllRooms() {
+  const roomList = [];
+  for (const [roomId, room] of rooms) {
+    roomList.push({
+      id: roomId,
+      connectedClients: room.connectedClients,
+      phase: room.timerState.phase,
+      running: room.timerState.running,
+      categoriesCount: room.timerState.categories.length,
+      roundsCount: room.timerState.rounds.length
+    });
+  }
+  return roomList;
+}
+
+// Delete a room
+function deleteRoom(roomId) {
+  // Don't delete the last room - must have at least one
+  if (rooms.size <= 1) return false;
+
+  const room = rooms.get(roomId);
+  if (room) {
+    // Stop any running timer
+    if (room.timerInterval) {
+      clearInterval(room.timerInterval);
+    }
+    rooms.delete(roomId);
+
+    // Delete persistence file
+    try {
+      const filePath = getRoomDataFile(roomId);
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+      }
+    } catch (error) {
+      console.error(`[${new Date().toISOString()}] Error deleting room file for "${roomId}":`, error);
+    }
+
+    console.log(`[${new Date().toISOString()}] Deleted room "${roomId}"`);
+    return true;
+  }
+  return false;
+}
+
+// Migrate old categories.json to room_default.json on first run
+function migrateOldCategories() {
+  try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+
+    const defaultRoomFile = getRoomDataFile(DEFAULT_ROOM);
+
+    // If default room file already exists, skip migration
+    if (fs.existsSync(defaultRoomFile)) {
+      return;
+    }
+
+    // Check if old categories.json exists
+    if (fs.existsSync(CATEGORIES_FILE)) {
+      const data = fs.readFileSync(CATEGORIES_FILE, 'utf8');
+      const parsed = JSON.parse(data);
+
+      let migrationData = { rounds: [], activeRoundIndex: 0 };
+
+      // Check if it's old format (array of categories) or newer format (object with rounds)
+      if (Array.isArray(parsed)) {
+        migrationData.rounds = parsed.length > 0 ? [{ name: 'Round 1', categories: parsed }] : [];
+      } else {
+        migrationData.rounds = (parsed.rounds || []).map(r => ({
+          ...r,
+          categories: r.categories || []
+        }));
+        migrationData.activeRoundIndex = parsed.activeRoundIndex || 0;
+      }
+
+      // Save to new room file
+      fs.writeFileSync(defaultRoomFile, JSON.stringify(migrationData, null, 2));
+      console.log(`[${new Date().toISOString()}] Migrated categories.json to room_default.json`);
+    }
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] Error during migration:`, error);
+  }
+}
+
+// Run migration on startup
+migrateOldCategories();
 
 const app = express();
 const server = http.createServer(app);
@@ -96,20 +228,75 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 // Health check endpoint for monitoring services
 app.get('/health', (req, res) => {
+  let totalClients = 0;
+  for (const room of rooms.values()) {
+    totalClients += room.connectedClients;
+  }
   res.status(200).json({
     status: 'healthy',
     uptime: process.uptime(),
-    connectedClients: connectedClients,
+    connectedClients: totalClients,
+    roomCount: rooms.size,
     timestamp: new Date().toISOString()
   });
 });
 
-// API endpoint to get current timer state
+// API endpoint to get current timer state for a room
 app.get('/api/state', (req, res) => {
+  const roomId = sanitizeRoomId(req.query.room || DEFAULT_ROOM);
+  const room = getOrCreateRoom(roomId);
   res.json({
-    state: timerState,
-    connectedClients: connectedClients
+    state: room.timerState,
+    connectedClients: room.connectedClients,
+    roomId: roomId
   });
+});
+
+// API endpoint to list all rooms
+app.get('/api/rooms', (req, res) => {
+  res.json({
+    rooms: getAllRooms()
+  });
+});
+
+// API endpoint to create a new room
+app.post('/api/rooms', express.json(), (req, res) => {
+  const { roomId } = req.body;
+  const sanitizedId = sanitizeRoomId(roomId);
+
+  if (!sanitizedId) {
+    return res.status(400).json({ error: 'Invalid room ID' });
+  }
+
+  if (rooms.has(sanitizedId)) {
+    return res.status(409).json({ error: 'Room already exists' });
+  }
+
+  getOrCreateRoom(sanitizedId);
+
+  res.json({
+    success: true,
+    roomId: sanitizedId
+  });
+});
+
+// API endpoint to delete a room
+app.delete('/api/rooms/:roomId', (req, res) => {
+  const roomId = sanitizeRoomId(req.params.roomId);
+
+  const room = rooms.get(roomId);
+  if (!room) {
+    return res.status(404).json({ error: 'Room not found' });
+  }
+
+  // Disconnect all clients in the room
+  io.to(roomId).emit('room-deleted');
+
+  if (deleteRoom(roomId)) {
+    res.json({ success: true });
+  } else {
+    res.status(400).json({ error: 'Cannot delete this room' });
+  }
 });
 
 // API endpoint to import climbers from Excel
@@ -119,6 +306,10 @@ app.post('/api/import-excel', upload.single('excel'), (req, res) => {
     if (!req.file) {
       return res.status(400).json({ error: 'No file uploaded' });
     }
+
+    // Get room from query parameter
+    const roomId = sanitizeRoomId(req.query.room || DEFAULT_ROOM);
+    const room = getOrCreateRoom(roomId);
 
     // Parse Excel file from buffer
     const workbook = XLSX.read(req.file.buffer, { type: 'buffer' });
@@ -186,28 +377,30 @@ app.post('/api/import-excel', upload.single('excel'), (req, res) => {
       return res.status(400).json({ error: 'No valid sheets found. Each sheet must have headers and at least one climber.' });
     }
 
-    // Update state with new rounds
-    timerState.rounds = newRounds;
-    timerState.activeRoundIndex = 0;
-    timerState.categories = newRounds[0].categories;
+    // Update room state with new rounds
+    room.timerState.rounds = newRounds;
+    room.timerState.activeRoundIndex = 0;
+    room.timerState.categories = newRounds[0].categories;
+    room.lastActivity = Date.now();
 
-    // Save and broadcast to all clients
-    saveCategories();
-    io.emit('rounds-sync', {
-      rounds: timerState.rounds.map(r => ({ name: r.name, categoryCount: r.categories?.length || 0 })),
-      activeRoundIndex: timerState.activeRoundIndex
+    // Save and broadcast to all clients in this room
+    saveRoomData(roomId, room);
+    io.to(roomId).emit('rounds-sync', {
+      rounds: room.timerState.rounds.map(r => ({ name: r.name, categoryCount: r.categories?.length || 0 })),
+      activeRoundIndex: room.timerState.activeRoundIndex
     });
-    io.emit('categories-sync', timerState.categories);
+    io.to(roomId).emit('categories-sync', room.timerState.categories);
 
     const totalClimbers = newRounds.reduce((sum, round) =>
       sum + round.categories.reduce((catSum, cat) => catSum + (cat.boulders[0]?.climbers?.length || 0), 0)
     , 0);
     const totalCategories = newRounds.reduce((sum, round) => sum + round.categories.length, 0);
 
-    console.log(`[${new Date().toISOString()}] Imported ${newRounds.length} rounds with ${totalCategories} categories and ${totalClimbers} total climbers from Excel`);
+    console.log(`[${new Date().toISOString()}] [Room: ${roomId}] Imported ${newRounds.length} rounds with ${totalCategories} categories and ${totalClimbers} total climbers from Excel`);
 
     res.json({
       success: true,
+      roomId: roomId,
       roundsCreated: newRounds.length,
       categoriesCreated: totalCategories,
       totalClimbers: totalClimbers,
@@ -223,50 +416,12 @@ app.post('/api/import-excel', upload.single('excel'), (req, res) => {
   }
 });
 
-// Store the current timer state on the server
-const loadedData = loadCategories();
-let timerState = {
-  climbMin: 4,
-  climbSec: 0,
-  transMin: 1,
-  transSec: 0,
-  phase: 'stopped',
-  running: false,
-  remaining: 240,
-  showNames: true,
-  // Multi-round support
-  rounds: loadedData.rounds,
-  activeRoundIndex: loadedData.activeRoundIndex,
-  // categories is derived from the active round
-  categories: loadedData.rounds[loadedData.activeRoundIndex]?.categories || []
-  // categories structure:
-  // [
-  //   {
-  //     id: 1,
-  //     name: "Women 18-24",
-  //     boulders: [
-  //       { boulderId: 1, climbers: ["Name1", "Name2", ...], currentClimberIndex: 0, held: false },
-  //       { boulderId: 2, climbers: ["Name1", "Name2", ...], currentClimberIndex: 0, held: false },
-  //       { boulderId: 3, climbers: ["Name1", "Name2", ...], currentClimberIndex: 0, held: false },
-  //       { boulderId: 4, climbers: ["Name1", "Name2", ...], currentClimberIndex: 0, held: false }
-  //     ],
-  //     climberProgress: {
-  //       "Name1": [1, 2],        // Has climbed boulders 1 and 2
-  //       "Name2": [1, 2, 3, 4],  // Completed all 4 - will be hidden
-  //     }
-  //   }
-  // ]
-};
+// Initialize default room on startup
+getOrCreateRoom(DEFAULT_ROOM);
 
-// Track connected clients
-let connectedClients = 0;
-
-// Server-side timer interval
-let timerInterval = null;
-
-// Helper functions
-const totalClimb = () => timerState.climbMin * 60 + timerState.climbSec;
-const totalTrans = () => timerState.transMin * 60 + timerState.transSec;
+// Helper functions for room timer calculations
+const totalClimb = (timerState) => timerState.climbMin * 60 + timerState.climbSec;
+const totalTrans = (timerState) => timerState.transMin * 60 + timerState.transSec;
 
 // --- Climber Completion Tracking Helpers ---
 
@@ -377,72 +532,93 @@ function advanceBoulder(boulder, category, boulderIndex = null) {
 
 // Auto-advance all non-held climbers (called when climb phase ends)
 // Process boulders in order (B1 first) to correctly handle cascading starts
-function advanceNonHeldClimbers() {
+function advanceNonHeldClimbers(timerState) {
   timerState.categories.forEach(category => {
     for (let i = 0; i < category.boulders.length; i++) {
       advanceBoulder(category.boulders[i], category, i);
     }
   });
-  console.log(`[${new Date().toISOString()}] Auto-advanced all non-held climbers`);
 }
 
-// Server-side countdown function
-function startServerTimer() {
-  if (timerInterval) return; // Already running
+// Server-side countdown function for a specific room
+function startServerTimerForRoom(roomId) {
+  const room = rooms.get(roomId);
+  if (!room || room.timerInterval) return; // Room doesn't exist or already running
 
-  timerInterval = setInterval(() => {
+  room.timerInterval = setInterval(() => {
+    const timerState = room.timerState;
     if (!timerState.running) {
-      stopServerTimer();
+      stopServerTimerForRoom(roomId);
       return;
     }
 
     const prev = timerState.remaining;
     const next = Math.max(prev - 1, 0);
     timerState.remaining = next;
+    room.lastActivity = Date.now();
 
-    // Broadcast the updated time to all clients
-    io.emit('timer-sync', timerState);
-    console.log(`[${new Date().toISOString()}] Timer tick: ${timerState.phase} - ${next}s remaining`);
+    // Broadcast the updated time to all clients in this room
+    io.to(roomId).emit('timer-sync', timerState);
+    console.log(`[${new Date().toISOString()}] [Room: ${roomId}] Timer tick: ${timerState.phase} - ${next}s remaining`);
 
     // Handle phase auto-advance when time hits 0
     if (next === 0) {
       setTimeout(() => {
-        if (timerState.phase === 'climb') {
-          // Auto-advance climbers before transitioning away from climb phase
-          advanceNonHeldClimbers();
-          io.emit('categories-sync', timerState.categories);
-          saveCategories();
+        const currentRoom = rooms.get(roomId);
+        if (!currentRoom) return;
 
-          if (totalTrans() > 0) {
-            timerState.phase = 'transition';
-            timerState.remaining = totalTrans();
+        const ts = currentRoom.timerState;
+        if (ts.phase === 'climb') {
+          // Auto-advance climbers before transitioning away from climb phase
+          advanceNonHeldClimbers(ts);
+          io.to(roomId).emit('categories-sync', ts.categories);
+          saveRoomData(roomId, currentRoom);
+
+          if (totalTrans(ts) > 0) {
+            ts.phase = 'transition';
+            ts.remaining = totalTrans(ts);
           } else {
-            timerState.phase = 'climb';
-            timerState.remaining = totalClimb();
+            ts.phase = 'climb';
+            ts.remaining = totalClimb(ts);
           }
-        } else if (timerState.phase === 'transition') {
-          timerState.phase = 'climb';
-          timerState.remaining = totalClimb();
+        } else if (ts.phase === 'transition') {
+          ts.phase = 'climb';
+          ts.remaining = totalClimb(ts);
         }
-        console.log(`[${new Date().toISOString()}] Phase advanced to: ${timerState.phase}`);
-        io.emit('timer-sync', timerState);
+        console.log(`[${new Date().toISOString()}] [Room: ${roomId}] Phase advanced to: ${ts.phase}`);
+        io.to(roomId).emit('timer-sync', ts);
       }, 1000); // Advance after the 0 is displayed for 1 second
     }
   }, 1000);
 }
 
-function stopServerTimer() {
-  if (timerInterval) {
-    clearInterval(timerInterval);
-    timerInterval = null;
-    console.log(`[${new Date().toISOString()}] Server timer stopped`);
+function stopServerTimerForRoom(roomId) {
+  const room = rooms.get(roomId);
+  if (room && room.timerInterval) {
+    clearInterval(room.timerInterval);
+    room.timerInterval = null;
+    console.log(`[${new Date().toISOString()}] [Room: ${roomId}] Server timer stopped`);
   }
 }
 
 io.on('connection', (socket) => {
-  connectedClients++;
   const clientId = socket.id.substring(0, 8);
-  console.log(`[${new Date().toISOString()}] Client ${clientId} connected. Total: ${connectedClients}`);
+  const roomId = sanitizeRoomId(socket.handshake.query.room || DEFAULT_ROOM);
+  const clientType = socket.handshake.query.type || 'display'; // 'operator' or 'display'
+
+  // Join the Socket.IO room
+  socket.join(roomId);
+  socket.roomId = roomId;
+  socket.clientType = clientType;
+
+  // Get or create the room
+  const room = getOrCreateRoom(roomId);
+  room.connectedClients++;
+  room.lastActivity = Date.now();
+
+  const timerState = room.timerState;
+
+  console.log(`[${new Date().toISOString()}] [Room: ${roomId}] Client ${clientId} (${clientType}) connected. Room clients: ${room.connectedClients}`);
 
   // Send the current timer state to the newly connected client
   socket.emit('timer-sync', timerState);
@@ -460,198 +636,249 @@ io.on('connection', (socket) => {
   });
   socket.emit('categories-sync', timerState.categories);
 
-  // Broadcast the updated client count to all clients
-  io.emit('client-count', connectedClients);
+  // Send room info
+  socket.emit('room-info', { roomId: roomId });
+
+  // Broadcast the updated client count to all clients in the room
+  io.to(roomId).emit('client-count', room.connectedClients);
 
   // Listen for timer state updates from any client
   socket.on('timer-update', (newState) => {
+
     try {
+      const currentRoom = rooms.get(socket.roomId);
+      if (!currentRoom) return;
+
+      const ts = currentRoom.timerState;
+
       // Validate incoming state
       if (typeof newState === 'object' && newState !== null) {
-        const wasRunning = timerState.running;
+        const wasRunning = ts.running;
 
         // Update the server's state
-        timerState = { ...timerState, ...newState };
+        Object.assign(ts, newState);
+        currentRoom.lastActivity = Date.now();
 
         // Start or stop the server timer based on running state
-        if (timerState.running && !wasRunning) {
-          startServerTimer();
-          console.log(`[${new Date().toISOString()}] Timer started by ${clientId}`);
-        } else if (!timerState.running && wasRunning) {
-          stopServerTimer();
-          console.log(`[${new Date().toISOString()}] Timer stopped by ${clientId}`);
+        if (ts.running && !wasRunning) {
+          startServerTimerForRoom(socket.roomId);
+          console.log(`[${new Date().toISOString()}] [Room: ${socket.roomId}] Timer started by ${clientId}`);
+        } else if (!ts.running && wasRunning) {
+          stopServerTimerForRoom(socket.roomId);
+          console.log(`[${new Date().toISOString()}] [Room: ${socket.roomId}] Timer stopped by ${clientId}`);
         }
 
-        // Broadcast the new state to ALL clients
-        io.emit('timer-sync', timerState);
+        // Broadcast the new state to ALL clients in the room
+        io.to(socket.roomId).emit('timer-sync', ts);
 
-        console.log(`[${new Date().toISOString()}] Timer updated by ${clientId}: phase=${timerState.phase}, remaining=${timerState.remaining}, running=${timerState.running}`);
+        console.log(`[${new Date().toISOString()}] [Room: ${socket.roomId}] Timer updated by ${clientId}: phase=${ts.phase}, remaining=${ts.remaining}, running=${ts.running}`);
       }
     } catch (error) {
-      console.error(`[${new Date().toISOString()}] Error updating timer:`, error);
+      console.error(`[${new Date().toISOString()}] [Room: ${socket.roomId}] Error updating timer:`, error);
     }
   });
 
   // Listen for configuration changes
   socket.on('config-update', (config) => {
     try {
-      if (typeof config === 'object' && config !== null) {
-        timerState.climbMin = config.climbMin;
-        timerState.climbSec = config.climbSec;
-        timerState.transMin = config.transMin;
-        timerState.transSec = config.transSec;
-        if (typeof config.showNames === 'boolean') {
-          timerState.showNames = config.showNames;
-        }
+      const currentRoom = rooms.get(socket.roomId);
+      if (!currentRoom) return;
 
-        // Broadcast config changes to ALL clients (including display screens)
-        io.emit('config-sync', {
-          climbMin: timerState.climbMin,
-          climbSec: timerState.climbSec,
-          transMin: timerState.transMin,
-          transSec: timerState.transSec,
-          showNames: timerState.showNames
+      const ts = currentRoom.timerState;
+
+      if (typeof config === 'object' && config !== null) {
+        ts.climbMin = config.climbMin;
+        ts.climbSec = config.climbSec;
+        ts.transMin = config.transMin;
+        ts.transSec = config.transSec;
+        if (typeof config.showNames === 'boolean') {
+          ts.showNames = config.showNames;
+        }
+        currentRoom.lastActivity = Date.now();
+
+        // Broadcast config changes to ALL clients in the room
+        io.to(socket.roomId).emit('config-sync', {
+          climbMin: ts.climbMin,
+          climbSec: ts.climbSec,
+          transMin: ts.transMin,
+          transSec: ts.transSec,
+          showNames: ts.showNames
         });
 
-        console.log(`[${new Date().toISOString()}] Config updated by ${clientId}: climb=${config.climbMin}:${config.climbSec}, showNames=${timerState.showNames}`);
+        console.log(`[${new Date().toISOString()}] [Room: ${socket.roomId}] Config updated by ${clientId}: climb=${config.climbMin}:${config.climbSec}, showNames=${ts.showNames}`);
       }
     } catch (error) {
-      console.error(`[${new Date().toISOString()}] Error updating config:`, error);
+      console.error(`[${new Date().toISOString()}] [Room: ${socket.roomId}] Error updating config:`, error);
     }
   });
 
   // Listen for category add/update
   socket.on('category-update', (category) => {
     try {
+      const currentRoom = rooms.get(socket.roomId);
+      if (!currentRoom) return;
+
+      const ts = currentRoom.timerState;
+
       if (typeof category === 'object' && category !== null) {
-        const existingIndex = timerState.categories.findIndex(c => c.id === category.id);
+        const existingIndex = ts.categories.findIndex(c => c.id === category.id);
 
         if (existingIndex >= 0) {
           // Update existing category
-          timerState.categories[existingIndex] = category;
-          console.log(`[${new Date().toISOString()}] Category updated by ${clientId}: ${category.name}`);
+          ts.categories[existingIndex] = category;
+          console.log(`[${new Date().toISOString()}] [Room: ${socket.roomId}] Category updated by ${clientId}: ${category.name}`);
         } else {
           // Add new category
-          timerState.categories.push(category);
-          console.log(`[${new Date().toISOString()}] Category added by ${clientId}: ${category.name}`);
+          ts.categories.push(category);
+          console.log(`[${new Date().toISOString()}] [Room: ${socket.roomId}] Category added by ${clientId}: ${category.name}`);
         }
 
         // Ensure active round exists, create if needed
-        if (timerState.rounds.length === 0) {
-          timerState.rounds.push({ name: 'Round 1', categories: [] });
-          timerState.activeRoundIndex = 0;
+        if (ts.rounds.length === 0) {
+          ts.rounds.push({ name: 'Round 1', categories: [] });
+          ts.activeRoundIndex = 0;
         }
         // Sync categories back to the active round
-        timerState.rounds[timerState.activeRoundIndex].categories = timerState.categories;
+        ts.rounds[ts.activeRoundIndex].categories = ts.categories;
+        currentRoom.lastActivity = Date.now();
 
-        // Broadcast to all clients
-        io.emit('categories-sync', timerState.categories);
-        saveCategories();
+        // Broadcast to all clients in the room
+        io.to(socket.roomId).emit('categories-sync', ts.categories);
+        saveRoomData(socket.roomId, currentRoom);
       }
     } catch (error) {
-      console.error(`[${new Date().toISOString()}] Error updating category:`, error);
+      console.error(`[${new Date().toISOString()}] [Room: ${socket.roomId}] Error updating category:`, error);
     }
   });
 
   // Listen for category delete
   socket.on('category-delete', (categoryId) => {
     try {
-      const initialLength = timerState.categories.length;
-      timerState.categories = timerState.categories.filter(c => c.id !== categoryId);
+      const currentRoom = rooms.get(socket.roomId);
+      if (!currentRoom) return;
 
-      if (timerState.categories.length < initialLength) {
+      const ts = currentRoom.timerState;
+      const initialLength = ts.categories.length;
+      ts.categories = ts.categories.filter(c => c.id !== categoryId);
+
+      if (ts.categories.length < initialLength) {
         // Sync categories back to the active round
-        if (timerState.rounds.length > 0) {
-          timerState.rounds[timerState.activeRoundIndex].categories = timerState.categories;
+        if (ts.rounds.length > 0) {
+          ts.rounds[ts.activeRoundIndex].categories = ts.categories;
         }
-        console.log(`[${new Date().toISOString()}] Category deleted by ${clientId}: ID ${categoryId}`);
-        io.emit('categories-sync', timerState.categories);
-        saveCategories();
+        currentRoom.lastActivity = Date.now();
+        console.log(`[${new Date().toISOString()}] [Room: ${socket.roomId}] Category deleted by ${clientId}: ID ${categoryId}`);
+        io.to(socket.roomId).emit('categories-sync', ts.categories);
+        saveRoomData(socket.roomId, currentRoom);
       }
     } catch (error) {
-      console.error(`[${new Date().toISOString()}] Error deleting category:`, error);
+      console.error(`[${new Date().toISOString()}] [Room: ${socket.roomId}] Error deleting category:`, error);
     }
   });
 
   // Listen for climber advancement (specific category and boulder)
   socket.on('advance-climber', (data) => {
     try {
+      const currentRoom = rooms.get(socket.roomId);
+      if (!currentRoom) return;
+
+      const ts = currentRoom.timerState;
       const { categoryId, boulderId } = data;
-      const category = timerState.categories.find(c => c.id === categoryId);
+      const category = ts.categories.find(c => c.id === categoryId);
 
       if (category) {
         const boulderIndex = category.boulders.findIndex(b => b.boulderId === boulderId);
         const boulder = category.boulders[boulderIndex];
         if (boulder && boulder.climbers.length > 0) {
           advanceBoulder(boulder, category, boulderIndex);
-          console.log(`[${new Date().toISOString()}] Climber advanced by ${clientId}: ${category.name} - Boulder ${boulderId}`);
-          io.emit('categories-sync', timerState.categories);
-          saveCategories();
+          currentRoom.lastActivity = Date.now();
+          console.log(`[${new Date().toISOString()}] [Room: ${socket.roomId}] Climber advanced by ${clientId}: ${category.name} - Boulder ${boulderId}`);
+          io.to(socket.roomId).emit('categories-sync', ts.categories);
+          saveRoomData(socket.roomId, currentRoom);
         }
       }
     } catch (error) {
-      console.error(`[${new Date().toISOString()}] Error advancing climber:`, error);
+      console.error(`[${new Date().toISOString()}] [Room: ${socket.roomId}] Error advancing climber:`, error);
     }
   });
 
   // Listen for advance all climbers in a specific boulder
   socket.on('advance-boulder', (boulderId) => {
     try {
-      timerState.categories.forEach(category => {
+      const currentRoom = rooms.get(socket.roomId);
+      if (!currentRoom) return;
+
+      const ts = currentRoom.timerState;
+      ts.categories.forEach(category => {
         const boulderIndex = category.boulders.findIndex(b => b.boulderId === boulderId);
         const boulder = category.boulders[boulderIndex];
         if (boulder) {
           advanceBoulder(boulder, category, boulderIndex);
         }
       });
-      console.log(`[${new Date().toISOString()}] All climbers advanced on Boulder ${boulderId} by ${clientId}`);
-      io.emit('categories-sync', timerState.categories);
-      saveCategories();
+      currentRoom.lastActivity = Date.now();
+      console.log(`[${new Date().toISOString()}] [Room: ${socket.roomId}] All climbers advanced on Boulder ${boulderId} by ${clientId}`);
+      io.to(socket.roomId).emit('categories-sync', ts.categories);
+      saveRoomData(socket.roomId, currentRoom);
     } catch (error) {
-      console.error(`[${new Date().toISOString()}] Error advancing boulder:`, error);
+      console.error(`[${new Date().toISOString()}] [Room: ${socket.roomId}] Error advancing boulder:`, error);
     }
   });
 
   // Listen for advance all climbers in a specific category
   socket.on('advance-category', (categoryId) => {
     try {
-      const category = timerState.categories.find(c => c.id === categoryId);
+      const currentRoom = rooms.get(socket.roomId);
+      if (!currentRoom) return;
+
+      const ts = currentRoom.timerState;
+      const category = ts.categories.find(c => c.id === categoryId);
       if (category) {
         // Process boulders in order to correctly handle cascading starts
         for (let i = 0; i < category.boulders.length; i++) {
           advanceBoulder(category.boulders[i], category, i);
         }
-        console.log(`[${new Date().toISOString()}] All climbers advanced in category ${category.name} by ${clientId}`);
-        io.emit('categories-sync', timerState.categories);
-        saveCategories();
+        currentRoom.lastActivity = Date.now();
+        console.log(`[${new Date().toISOString()}] [Room: ${socket.roomId}] All climbers advanced in category ${category.name} by ${clientId}`);
+        io.to(socket.roomId).emit('categories-sync', ts.categories);
+        saveRoomData(socket.roomId, currentRoom);
       }
     } catch (error) {
-      console.error(`[${new Date().toISOString()}] Error advancing category:`, error);
+      console.error(`[${new Date().toISOString()}] [Room: ${socket.roomId}] Error advancing category:`, error);
     }
   });
 
   // Listen for advance all climbers (all categories, all boulders)
   socket.on('advance-all-climbers', () => {
     try {
-      timerState.categories.forEach(category => {
+      const currentRoom = rooms.get(socket.roomId);
+      if (!currentRoom) return;
+
+      const ts = currentRoom.timerState;
+      ts.categories.forEach(category => {
         // Process boulders in order to correctly handle cascading starts
         for (let i = 0; i < category.boulders.length; i++) {
           advanceBoulder(category.boulders[i], category, i);
         }
       });
-      console.log(`[${new Date().toISOString()}] All climbers advanced by ${clientId}`);
-      io.emit('categories-sync', timerState.categories);
-      saveCategories();
+      currentRoom.lastActivity = Date.now();
+      console.log(`[${new Date().toISOString()}] [Room: ${socket.roomId}] All climbers advanced by ${clientId}`);
+      io.to(socket.roomId).emit('categories-sync', ts.categories);
+      saveRoomData(socket.roomId, currentRoom);
     } catch (error) {
-      console.error(`[${new Date().toISOString()}] Error advancing all climbers:`, error);
+      console.error(`[${new Date().toISOString()}] [Room: ${socket.roomId}] Error advancing all climbers:`, error);
     }
   });
 
   // Listen for skip climber on boulder (inserts empty that flows through remaining boulders)
   socket.on('skip-boulder-climber', (data) => {
     try {
+      const currentRoom = rooms.get(socket.roomId);
+      if (!currentRoom) return;
+
+      const ts = currentRoom.timerState;
       const { categoryId, boulderId } = data;
-      const category = timerState.categories.find(c => c.id === categoryId);
+      const category = ts.categories.find(c => c.id === categoryId);
       if (category) {
         const boulderIndex = category.boulders.findIndex(b => b.boulderId === boulderId);
         const boulder = category.boulders[boulderIndex];
@@ -661,21 +888,26 @@ io.on('connection', (socket) => {
           if (boulderIndex < category.boulders.length - 1) {
             category.boulders[boulderIndex + 1].skipNext = true;
           }
+          currentRoom.lastActivity = Date.now();
 
-          console.log(`[${new Date().toISOString()}] Skipped climber on Boulder ${boulderId} in ${category.name} by ${clientId}`);
-          io.emit('categories-sync', timerState.categories);
-          saveCategories();
+          console.log(`[${new Date().toISOString()}] [Room: ${socket.roomId}] Skipped climber on Boulder ${boulderId} in ${category.name} by ${clientId}`);
+          io.to(socket.roomId).emit('categories-sync', ts.categories);
+          saveRoomData(socket.roomId, currentRoom);
         }
       }
     } catch (error) {
-      console.error(`[${new Date().toISOString()}] Error skipping boulder climber:`, error);
+      console.error(`[${new Date().toISOString()}] [Room: ${socket.roomId}] Error skipping boulder climber:`, error);
     }
   });
 
   // Listen for reset category progress (clears completion tracking)
   socket.on('reset-category-progress', (categoryId) => {
     try {
-      const category = timerState.categories.find(c => c.id === categoryId);
+      const currentRoom = rooms.get(socket.roomId);
+      if (!currentRoom) return;
+
+      const ts = currentRoom.timerState;
+      const category = ts.categories.find(c => c.id === categoryId);
       if (category) {
         // Reset climber progress tracking
         category.climberProgress = {};
@@ -685,29 +917,34 @@ io.on('connection', (socket) => {
           boulder.hasStarted = false;
           boulder.skipNext = false;
         });
-        console.log(`[${new Date().toISOString()}] Category progress reset by ${clientId}: ${category.name}`);
-        io.emit('categories-sync', timerState.categories);
-        saveCategories();
+        currentRoom.lastActivity = Date.now();
+        console.log(`[${new Date().toISOString()}] [Room: ${socket.roomId}] Category progress reset by ${clientId}: ${category.name}`);
+        io.to(socket.roomId).emit('categories-sync', ts.categories);
+        saveRoomData(socket.roomId, currentRoom);
       }
     } catch (error) {
-      console.error(`[${new Date().toISOString()}] Error resetting category progress:`, error);
+      console.error(`[${new Date().toISOString()}] [Room: ${socket.roomId}] Error resetting category progress:`, error);
     }
   });
 
   // Listen for round switch (multi-round navigation)
   socket.on('switch-round', (roundIndex) => {
     try {
+      const currentRoom = rooms.get(socket.roomId);
+      if (!currentRoom) return;
+
+      const ts = currentRoom.timerState;
       const newIndex = parseInt(roundIndex);
-      if (isNaN(newIndex) || newIndex < 0 || newIndex >= timerState.rounds.length) {
-        console.log(`[${new Date().toISOString()}] Invalid round index: ${roundIndex}`);
+      if (isNaN(newIndex) || newIndex < 0 || newIndex >= ts.rounds.length) {
+        console.log(`[${new Date().toISOString()}] [Room: ${socket.roomId}] Invalid round index: ${roundIndex}`);
         return;
       }
 
       // Update active round index
-      timerState.activeRoundIndex = newIndex;
+      ts.activeRoundIndex = newIndex;
 
       // Reset all category progress in the new round (fresh start)
-      const newRound = timerState.rounds[newIndex];
+      const newRound = ts.rounds[newIndex];
       newRound.categories.forEach(category => {
         category.climberProgress = {};
         category.boulders.forEach(boulder => {
@@ -718,34 +955,38 @@ io.on('connection', (socket) => {
       });
 
       // Update categories from active round
-      timerState.categories = newRound.categories;
+      ts.categories = newRound.categories;
+      currentRoom.lastActivity = Date.now();
 
-      console.log(`[${new Date().toISOString()}] Switched to round ${newIndex + 1} (${newRound.name}) by ${clientId}`);
+      console.log(`[${new Date().toISOString()}] [Room: ${socket.roomId}] Switched to round ${newIndex + 1} (${newRound.name}) by ${clientId}`);
 
-      // Broadcast to all clients
-      io.emit('rounds-sync', {
-        rounds: timerState.rounds.map(r => ({ name: r.name, categoryCount: r.categories?.length || 0 })),
-        activeRoundIndex: timerState.activeRoundIndex
+      // Broadcast to all clients in the room
+      io.to(socket.roomId).emit('rounds-sync', {
+        rounds: ts.rounds.map(r => ({ name: r.name, categoryCount: r.categories?.length || 0 })),
+        activeRoundIndex: ts.activeRoundIndex
       });
-      io.emit('categories-sync', timerState.categories);
-      saveCategories();
+      io.to(socket.roomId).emit('categories-sync', ts.categories);
+      saveRoomData(socket.roomId, currentRoom);
     } catch (error) {
-      console.error(`[${new Date().toISOString()}] Error switching round:`, error);
+      console.error(`[${new Date().toISOString()}] [Room: ${socket.roomId}] Error switching round:`, error);
     }
   });
 
   // Handle errors
   socket.on('error', (error) => {
-    console.error(`[${new Date().toISOString()}] Socket error for ${clientId}:`, error);
+    console.error(`[${new Date().toISOString()}] [Room: ${socket.roomId}] Socket error for ${clientId}:`, error);
   });
 
   // Handle client disconnect
   socket.on('disconnect', () => {
-    connectedClients--;
-    console.log(`[${new Date().toISOString()}] Client ${clientId} disconnected. Total: ${connectedClients}`);
+    const currentRoom = rooms.get(socket.roomId);
+    if (currentRoom) {
+      currentRoom.connectedClients--;
+      console.log(`[${new Date().toISOString()}] [Room: ${socket.roomId}] Client ${clientId} disconnected. Room clients: ${currentRoom.connectedClients}`);
 
-    // Broadcast the updated client count to all remaining clients
-    io.emit('client-count', connectedClients);
+      // Broadcast the updated client count to all remaining clients in the room
+      io.to(socket.roomId).emit('client-count', currentRoom.connectedClients);
+    }
   });
 });
 
@@ -774,12 +1015,56 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`Server is ready to accept connections.\n`);
 });
 
+// --- Room Cleanup ---
+// Configurable cleanup threshold (default 24 hours in ms)
+const ROOM_CLEANUP_THRESHOLD_MS = parseInt(process.env.ROOM_CLEANUP_HOURS || '24') * 60 * 60 * 1000;
+const ROOM_CLEANUP_INTERVAL_MS = 5 * 60 * 1000; // Check every 5 minutes
+
+function cleanupInactiveRooms() {
+  const now = Date.now();
+  const roomsToDelete = [];
+
+  for (const [roomId, room] of rooms) {
+    // Never delete default room
+    if (roomId === DEFAULT_ROOM) continue;
+
+    // Don't delete rooms with running timers
+    if (room.timerState.running) continue;
+
+    // Don't delete rooms with connected clients
+    if (room.connectedClients > 0) continue;
+
+    // Check inactivity threshold
+    if (now - room.lastActivity > ROOM_CLEANUP_THRESHOLD_MS) {
+      roomsToDelete.push(roomId);
+    }
+  }
+
+  for (const roomId of roomsToDelete) {
+    console.log(`[${new Date().toISOString()}] Cleaning up inactive room: ${roomId}`);
+    deleteRoom(roomId);
+  }
+
+  if (roomsToDelete.length > 0) {
+    console.log(`[${new Date().toISOString()}] Cleaned up ${roomsToDelete.length} inactive rooms`);
+  }
+}
+
+// Start cleanup interval
+const cleanupInterval = setInterval(cleanupInactiveRooms, ROOM_CLEANUP_INTERVAL_MS);
+
 // Graceful shutdown handling
 const gracefulShutdown = (signal) => {
   console.log(`\n[${new Date().toISOString()}] ${signal} received. Starting graceful shutdown...`);
 
-  // Save categories before shutdown
-  saveCategories();
+  // Stop cleanup interval
+  clearInterval(cleanupInterval);
+
+  // Save all rooms before shutdown
+  for (const [roomId, room] of rooms) {
+    saveRoomData(roomId, room);
+  }
+  console.log(`[${new Date().toISOString()}] Saved ${rooms.size} rooms`);
 
   server.close(() => {
     console.log(`[${new Date().toISOString()}] HTTP server closed`);

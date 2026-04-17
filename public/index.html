@@ -250,6 +250,10 @@
               <span class="text-gray-500">:</span>
               <input id="transSec" type="number" min="0" max="59" value="0" class="w-12 px-2 py-1 rounded text-sm" />
             </div>
+            <div class="flex items-center gap-1 mt-1">
+              <input type="checkbox" id="manualTransition" class="w-3 h-3" />
+              <label for="manualTransition" class="text-xs text-gray-400 cursor-pointer">Manual</label>
+            </div>
           </div>
         </div>
 
@@ -407,6 +411,7 @@
       climbSec: 0,
       transMin: 1,
       transSec: 0,
+      manualTransition: false,
       phase: 'stopped',
       running: false,
       remaining: 240,
@@ -543,7 +548,15 @@
     function updateDisplay(){
       document.getElementById('timeDisplay').textContent = fmt(state.remaining);
       document.getElementById('phaseLabel').textContent = state.phase === 'stopped' ? 'Ready' : (state.phase === 'climb' ? 'Climb' : 'Transition');
-      document.getElementById('startPause').textContent = state.running ? 'Pause' : (state.phase === 'stopped' ? 'Start' : 'Resume');
+      let btnText = 'Resume';
+      if (state.running) {
+        btnText = 'Pause';
+      } else if (state.phase === 'stopped') {
+        btnText = 'Start';
+      } else if (state.phase === 'transition' && !state.running) {
+        btnText = 'Start Climb';
+      }
+      document.getElementById('startPause').textContent = btnText;
     }
 
     // Emit state to server
@@ -554,6 +567,7 @@
           climbSec: state.climbSec,
           transMin: state.transMin,
           transSec: state.transSec,
+          manualTransition: state.manualTransition,
           phase: state.phase,
           running: state.running,
           remaining: state.remaining
@@ -567,6 +581,10 @@
       // Calculate what the new state should be (but don't apply it locally)
       let newState = { ...state };
       if (state.phase === 'stopped') {
+        newState.phase = 'climb';
+        newState.remaining = totalClimb();
+      } else if (state.phase === 'transition' && !state.running) {
+        // Manual transition: operator starts next climb phase
         newState.phase = 'climb';
         newState.remaining = totalClimb();
       }
@@ -673,6 +691,10 @@
       state.climbSec = config.climbSec;
       state.transMin = config.transMin;
       state.transSec = config.transSec;
+      if (typeof config.manualTransition === 'boolean') {
+        state.manualTransition = config.manualTransition;
+        document.getElementById('manualTransition').checked = config.manualTransition;
+      }
       if (typeof config.showNames === 'boolean') {
         state.showNames = config.showNames;
         const toggle = document.getElementById('showNamesToggle');
@@ -953,7 +975,8 @@
           climbMin: state.climbMin,
           climbSec: state.climbSec,
           transMin: state.transMin,
-          transSec: state.transSec
+          transSec: state.transSec,
+          manualTransition: state.manualTransition
         });
       }
     });
@@ -969,7 +992,8 @@
           climbMin: state.climbMin,
           climbSec: state.climbSec,
           transMin: state.transMin,
-          transSec: state.transSec
+          transSec: state.transSec,
+          manualTransition: state.manualTransition
         });
       }
     });
@@ -981,7 +1005,8 @@
           climbMin: state.climbMin,
           climbSec: state.climbSec,
           transMin: state.transMin,
-          transSec: state.transSec
+          transSec: state.transSec,
+          manualTransition: state.manualTransition
         });
       }
     });
@@ -993,7 +1018,22 @@
           climbMin: state.climbMin,
           climbSec: state.climbSec,
           transMin: state.transMin,
-          transSec: state.transSec
+          transSec: state.transSec,
+          manualTransition: state.manualTransition
+        });
+      }
+    });
+
+    // --- Wire manual transition checkbox ---
+    document.getElementById('manualTransition').addEventListener('change', (e) => {
+      state.manualTransition = e.target.checked;
+      if (!state.syncInProgress) {
+        socket.emit('config-update', {
+          climbMin: state.climbMin,
+          climbSec: state.climbSec,
+          transMin: state.transMin,
+          transSec: state.transSec,
+          manualTransition: state.manualTransition
         });
       }
     });
@@ -1008,6 +1048,7 @@
           climbSec: state.climbSec,
           transMin: state.transMin,
           transSec: state.transSec,
+          manualTransition: state.manualTransition,
           showNames: state.showNames
         });
       }

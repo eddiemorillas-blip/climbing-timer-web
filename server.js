@@ -44,6 +44,7 @@ function createRoomState() {
       climbSec: 0,
       transMin: 1,
       transSec: 0,
+      manualTransition: false,
       phase: 'stopped',
       running: false,
       remaining: 240,
@@ -574,7 +575,13 @@ function startServerTimerForRoom(roomId) {
           io.to(roomId).emit('categories-sync', ts.categories);
           saveRoomData(roomId, currentRoom);
 
-          if (totalTrans(ts) > 0) {
+          if (ts.manualTransition) {
+            // Manual transition: stop timer and wait for operator
+            ts.phase = 'transition';
+            ts.remaining = 0;
+            ts.running = false;
+            stopServerTimerForRoom(roomId);
+          } else if (totalTrans(ts) > 0) {
             ts.phase = 'transition';
             ts.remaining = totalTrans(ts);
           } else {
@@ -627,6 +634,7 @@ io.on('connection', (socket) => {
     climbSec: timerState.climbSec,
     transMin: timerState.transMin,
     transSec: timerState.transSec,
+    manualTransition: timerState.manualTransition,
     showNames: timerState.showNames
   });
   // Send rounds info for multi-round navigation
@@ -691,6 +699,9 @@ io.on('connection', (socket) => {
         ts.climbSec = config.climbSec;
         ts.transMin = config.transMin;
         ts.transSec = config.transSec;
+        if (typeof config.manualTransition === 'boolean') {
+          ts.manualTransition = config.manualTransition;
+        }
         if (typeof config.showNames === 'boolean') {
           ts.showNames = config.showNames;
         }
@@ -702,6 +713,7 @@ io.on('connection', (socket) => {
           climbSec: ts.climbSec,
           transMin: ts.transMin,
           transSec: ts.transSec,
+          manualTransition: ts.manualTransition,
           showNames: ts.showNames
         });
 

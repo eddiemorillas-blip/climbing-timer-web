@@ -226,15 +226,26 @@
       query: {
         room: currentRoomId,
         type: 'display'
-      }
+      },
+      // Fast reconnection; the countdown keeps running locally during a drop.
+      reconnection: true,
+      reconnectionDelay: 400,
+      reconnectionDelayMax: 2000,
+      reconnectionAttempts: Infinity,
+      timeout: 8000
     });
 
+    let isConnected = false;
+
     socket.on('connect', () => {
+      isConnected = true;
       document.getElementById('statusDot').className = 'status-dot status-connected';
       document.getElementById('connectionStatus').textContent = 'Connected';
+      syncClock();
     });
 
     socket.on('disconnect', () => {
+      isConnected = false;
       document.getElementById('statusDot').className = 'status-dot status-disconnected';
       document.getElementById('connectionStatus').textContent = 'Disconnected';
     });
@@ -249,9 +260,50 @@
     const state = {
       phase: 'stopped',
       remaining: 240,
+      deadline: null,
+      clockOffset: 0,
+      clockSynced: false,
       showNames: true,
       categories: []
     };
+
+    // --- Clock synchronization (NTP-style) — matches the operator page. ---
+    function serverNow() { return Date.now() + state.clockOffset; }
+
+    let clockSamples = [];
+    socket.on('time-pong', ({ t0, serverTime }) => {
+      const t1 = Date.now();
+      const rtt = t1 - t0;
+      clockSamples.push({ rtt, offset: serverTime + rtt / 2 - t1 });
+    });
+
+    function syncClock(rounds = 6) {
+      if (!isConnected) return;
+      clockSamples = [];
+      let i = 0;
+      const iv = setInterval(() => {
+        if (!isConnected) { clearInterval(iv); return; }
+        socket.emit('time-ping', Date.now());
+        if (++i >= rounds) {
+          clearInterval(iv);
+          setTimeout(() => {
+            if (!clockSamples.length) return;
+            clockSamples.sort((a, b) => a.rtt - b.rtt);
+            state.clockOffset = clockSamples[0].offset;
+            state.clockSynced = true;
+          }, 250);
+        }
+      }, 120);
+    }
+    setInterval(() => { if (isConnected) syncClock(); }, 30000);
+
+    // Seconds remaining derived locally from the server deadline.
+    function computeRemaining() {
+      if (state.deadline) {
+        return Math.max(0, (state.deadline - serverNow()) / 1000);
+      }
+      return state.remaining;
+    }
 
     const fmt = (s) => {
       s = Math.max(0, Math.floor(s));
@@ -260,7 +312,7 @@
     };
 
     function updateDisplay() {
-      document.getElementById('timeDisplay').textContent = fmt(state.remaining);
+      document.getElementById('timeDisplay').textContent = fmt(Math.ceil(computeRemaining() - 1e-6));
       const phaseLabel = document.getElementById('phaseLabel');
       if (state.phase === 'stopped') {
         phaseLabel.textContent = 'Ready';
@@ -287,8 +339,12 @@
 
     // --- Listen for state updates from server ---
     socket.on('timer-sync', (serverState) => {
+      if (!state.clockSynced && typeof serverState.serverTime === 'number') {
+        state.clockOffset = serverState.serverTime - Date.now();
+      }
       state.phase = serverState.phase;
       state.remaining = serverState.remaining;
+      state.deadline = (typeof serverState.deadline === 'number') ? serverState.deadline : null;
       if (typeof serverState.showNames === 'boolean') {
         state.showNames = serverState.showNames;
         renderClimberGrid();
@@ -377,6 +433,14 @@
 
       grid.innerHTML = html;
     }
+
+    // Smooth local render loop — keeps the clock moving every frame, so a wifi
+    // drop no longer freezes the displayed time.
+    function renderLoop() {
+      document.getElementById('timeDisplay').textContent = fmt(Math.ceil(computeRemaining() - 1e-6));
+      requestAnimationFrame(renderLoop);
+    }
+    requestAnimationFrame(renderLoop);
 
     // Init
     updateDisplay();

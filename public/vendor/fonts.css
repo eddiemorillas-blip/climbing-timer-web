@@ -1,0 +1,8 @@
+/* Locally hosted Roboto Mono (700) so pages render identically with no internet. */
+@font-face {
+  font-family: 'Roboto Mono';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('/vendor/fonts/roboto-mono-700.woff2') format('woff2');
+}

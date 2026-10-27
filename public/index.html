@@ -153,25 +153,34 @@
   <div id="shareModal" class="modal-overlay" style="display: none;">
     <div class="modal-content">
       <h2>Share Room</h2>
-      <div class="space-y-4">
-        <div>
-          <label class="text-gray-400 text-sm block mb-1">Operator Link (can control timer)</label>
-          <div class="flex gap-2">
-            <input type="text" id="operatorLinkInput" readonly class="flex-1 bg-gray-800 text-sm" />
-            <button id="copyOperatorLink" class="px-3 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg font-semibold text-sm">Copy</button>
-          </div>
-        </div>
 
-        <div>
-          <label class="text-gray-400 text-sm block mb-1">Display Link (view only, for projector)</label>
-          <div class="flex gap-2">
-            <input type="text" id="displayLinkInput" readonly class="flex-1 bg-gray-800 text-sm" />
-            <button id="copyDisplayLink" class="px-3 py-2 bg-green-600 hover:bg-green-700 rounded-lg font-semibold text-sm">Copy</button>
-          </div>
+      <!-- Room code: big, easy to read out or type at the base URL -->
+      <div class="text-center mb-4">
+        <div class="text-gray-400 text-xs uppercase tracking-wide">Room code</div>
+        <div id="shareRoomCode" class="text-3xl font-bold tracking-widest text-white"></div>
+        <div class="text-gray-500 text-xs mt-1">
+          On another device, open <span id="shareBaseUrl" class="text-gray-300"></span> and enter this code.
         </div>
-
-        <button id="closeShareBtn" class="w-full px-4 py-2 bg-gray-600 hover:bg-gray-700 rounded-lg font-semibold">Close</button>
       </div>
+
+      <div class="grid grid-cols-2 gap-3 mb-4">
+        <div class="text-center">
+          <div class="text-green-400 text-sm font-semibold mb-1">Display (scan me)</div>
+          <div class="text-gray-500 text-xs mb-2">view only · for projector/TV</div>
+          <img id="displayQr" alt="Display QR" class="mx-auto bg-white p-2 rounded-lg" style="width:160px;height:160px;image-rendering:pixelated;" />
+          <button id="copyDisplayLink" class="mt-2 px-3 py-1.5 bg-green-600 hover:bg-green-700 rounded-lg font-semibold text-xs">Copy link</button>
+          <input type="text" id="displayLinkInput" readonly class="hidden" />
+        </div>
+        <div class="text-center">
+          <div class="text-blue-400 text-sm font-semibold mb-1">Operator (scan me)</div>
+          <div class="text-gray-500 text-xs mb-2">can control the timer</div>
+          <img id="operatorQr" alt="Operator QR" class="mx-auto bg-white p-2 rounded-lg" style="width:160px;height:160px;image-rendering:pixelated;" />
+          <button id="copyOperatorLink" class="mt-2 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 rounded-lg font-semibold text-xs">Copy link</button>
+          <input type="text" id="operatorLinkInput" readonly class="hidden" />
+        </div>
+      </div>
+
+      <button id="closeShareBtn" class="w-full px-4 py-2 bg-gray-600 hover:bg-gray-700 rounded-lg font-semibold">Close</button>
     </div>
   </div>
 
@@ -179,18 +188,26 @@
   <div id="roomPickerModal" class="modal-overlay" style="display: none;">
     <div class="modal-content">
       <h2>Climbing Timer</h2>
-      <p class="text-gray-400 text-sm mb-4">Create a new room to get started. Share the link to invite others.</p>
 
-      <div class="space-y-3">
-        <div>
-          <label class="text-gray-400 text-sm block mb-1">Room Name</label>
-          <input type="text" id="newRoomNameInput" placeholder="e.g., gym-a, competition-2024" class="w-full" />
+      <!-- Create a new room (with a short, auto-generated code pre-filled) -->
+      <div class="space-y-2 mb-5">
+        <label class="text-gray-400 text-sm block">New room code</label>
+        <div class="flex gap-2">
+          <input type="text" id="newRoomNameInput" class="flex-1 uppercase tracking-widest font-semibold" />
+          <button id="shuffleCodeBtn" title="New code" class="px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm">↻</button>
         </div>
-
         <button id="createJoinRoomBtn" class="w-full px-4 py-2 bg-green-600 hover:bg-green-700 rounded-lg font-semibold">Create Room</button>
+        <p class="text-gray-500 text-xs">A short code is easier to share. You can also type your own name.</p>
       </div>
 
-      <p class="text-gray-500 text-xs mt-4 text-center">Have an invite link? Just open it directly.</p>
+      <div class="border-t border-gray-700 pt-4 space-y-2">
+        <label class="text-gray-400 text-sm block">Join an existing room</label>
+        <div class="flex gap-2">
+          <input type="text" id="joinCodeInput" placeholder="Enter room code" class="flex-1 uppercase tracking-widest font-semibold" />
+          <button id="joinRoomBtn" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg font-semibold">Join</button>
+        </div>
+        <p class="text-gray-500 text-xs">Or just open the invite link / scan the QR code.</p>
+      </div>
     </div>
   </div>
 
@@ -294,6 +311,7 @@
 
   <!-- Socket.IO Client Library -->
   <script src="/socket.io/socket.io.js"></script>
+  <script src="/vendor/qrcode.js"></script>
 
   <script>
     // --- Room ID from URL ---
@@ -358,10 +376,33 @@
       return { operatorLink, displayLink };
     }
 
+    // Render a QR code (as a data URL) for `text` into the <img id=imgId>.
+    // Auto-sizes the QR version to fit the data; works fully offline.
+    function renderQr(imgId, text) {
+      const img = document.getElementById(imgId);
+      try {
+        let qr = null;
+        for (let type = 2; type <= 40; type++) {
+          try { qr = qrcode(type, 'M'); qr.addData(text); qr.make(); break; }
+          catch (e) { qr = null; }
+        }
+        if (!qr) throw new Error('QR data too long');
+        img.src = qr.createDataURL(6, 2); // cellSize, margin
+        img.style.display = '';
+      } catch (e) {
+        console.error('QR render failed:', e);
+        img.style.display = 'none';
+      }
+    }
+
     document.getElementById('shareBtn').addEventListener('click', () => {
       const { operatorLink, displayLink } = getShareLinks();
       document.getElementById('operatorLinkInput').value = operatorLink;
       document.getElementById('displayLinkInput').value = displayLink;
+      document.getElementById('shareRoomCode').textContent = currentRoomId;
+      document.getElementById('shareBaseUrl').textContent = window.location.host;
+      renderQr('displayQr', displayLink);
+      renderQr('operatorQr', operatorLink);
       document.getElementById('shareModal').style.display = 'flex';
     });
 
@@ -369,41 +410,64 @@
       document.getElementById('shareModal').style.display = 'none';
     });
 
-    document.getElementById('copyOperatorLink').addEventListener('click', () => {
-      const input = document.getElementById('operatorLinkInput');
-      navigator.clipboard.writeText(input.value);
-      document.getElementById('copyOperatorLink').textContent = 'Copied!';
-      setTimeout(() => document.getElementById('copyOperatorLink').textContent = 'Copy', 1500);
-    });
-
-    document.getElementById('copyDisplayLink').addEventListener('click', () => {
-      const input = document.getElementById('displayLinkInput');
-      navigator.clipboard.writeText(input.value);
-      document.getElementById('copyDisplayLink').textContent = 'Copied!';
-      setTimeout(() => document.getElementById('copyDisplayLink').textContent = 'Copy', 1500);
-    });
+    function wireCopy(btnId, inputId) {
+      document.getElementById(btnId).addEventListener('click', () => {
+        navigator.clipboard.writeText(document.getElementById(inputId).value);
+        const btn = document.getElementById(btnId);
+        const prev = btn.textContent;
+        btn.textContent = 'Copied!';
+        setTimeout(() => btn.textContent = prev, 1500);
+      });
+    }
+    wireCopy('copyOperatorLink', 'operatorLinkInput');
+    wireCopy('copyDisplayLink', 'displayLinkInput');
 
     // --- Room Picker (shown when visiting without explicit room) ---
+    // Normalize a typed code to a valid room id (matches server sanitizeRoomId,
+    // and uppercases so hand-typed codes match generated ones case-sensitively).
+    function normalizeCode(s) {
+      return (s || '').trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '').substring(0, 50);
+    }
+
+    function goToRoom(code) {
+      const id = normalizeCode(code);
+      if (id) window.location.href = `/index.html?room=${encodeURIComponent(id)}`;
+    }
+
+    async function fillSuggestedCode() {
+      const input = document.getElementById('newRoomNameInput');
+      try {
+        const res = await fetch('/api/newcode');
+        const data = await res.json();
+        input.value = data.code;
+      } catch (e) {
+        // Offline/endpoint missing: fall back to a client-side code.
+        const words = ['DYNO','CRIMP','JUG','SLAB','SEND','BETA','CRUX','FLASH'];
+        input.value = words[Math.floor(Math.random() * words.length)] + '-' + (1 + Math.floor(Math.random() * 9));
+      }
+    }
+
     function showRoomPicker() {
       const modal = document.getElementById('roomPickerModal');
       modal.style.display = 'flex';
-      document.getElementById('newRoomNameInput').focus();
+      fillSuggestedCode();
+      document.getElementById('joinCodeInput').focus();
     }
 
+    document.getElementById('shuffleCodeBtn').addEventListener('click', fillSuggestedCode);
+
     document.getElementById('createJoinRoomBtn').addEventListener('click', () => {
-      const roomName = document.getElementById('newRoomNameInput').value.trim();
-      if (roomName) {
-        window.location.href = `/index.html?room=${encodeURIComponent(roomName)}`;
-      }
+      goToRoom(document.getElementById('newRoomNameInput').value);
+    });
+    document.getElementById('newRoomNameInput').addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') goToRoom(document.getElementById('newRoomNameInput').value);
     });
 
-    document.getElementById('newRoomNameInput').addEventListener('keypress', (e) => {
-      if (e.key === 'Enter') {
-        const roomName = document.getElementById('newRoomNameInput').value.trim();
-        if (roomName) {
-          window.location.href = `/index.html?room=${encodeURIComponent(roomName)}`;
-        }
-      }
+    document.getElementById('joinRoomBtn').addEventListener('click', () => {
+      goToRoom(document.getElementById('joinCodeInput').value);
+    });
+    document.getElementById('joinCodeInput').addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') goToRoom(document.getElementById('joinCodeInput').value);
     });
 
     // Show room picker if visiting without a room parameter

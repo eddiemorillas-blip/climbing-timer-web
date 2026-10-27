@@ -36,6 +36,25 @@ function sanitizeRoomId(roomId) {
   return sanitized || DEFAULT_ROOM;
 }
 
+// Generate a short, on-theme, easy-to-read/type room code (e.g. "DYNO-7") that
+// isn't already in use. Codes are the room id, so they're uppercase to match
+// hand-typed input consistently (room ids are case-sensitive).
+const CODE_WORDS = ['DYNO', 'CRIMP', 'JUG', 'SLAB', 'SEND', 'BETA', 'CHALK', 'FLASH',
+  'CRUX', 'ARETE', 'SLOPER', 'HEEL', 'MANTLE', 'GASTON', 'PINCH', 'POCKET', 'ROOF',
+  'CAMPUS', 'SMEAR', 'EDGE', 'RAIL', 'PROW', 'MATCH', 'TOPOUT', 'ONSIGHT', 'PROJECT',
+  'BOULDER', 'DEADPOINT', 'LOCKOFF', 'TRAVERSE'];
+
+function generateRoomCode() {
+  for (let attempt = 0; attempt < 300; attempt++) {
+    const word = CODE_WORDS[Math.floor(Math.random() * CODE_WORDS.length)];
+    const num = 1 + Math.floor(Math.random() * 9);
+    const code = `${word}-${num}`;
+    if (!rooms.has(code)) return code;
+  }
+  // Fallback with more entropy if the simple space is exhausted.
+  return `ROOM-${Date.now().toString(36).slice(-4).toUpperCase()}`;
+}
+
 // Create default timer state for a new room
 function createRoomState() {
   return {
@@ -264,6 +283,11 @@ app.get('/api/rooms', (req, res) => {
   res.json({
     rooms: getAllRooms()
   });
+});
+
+// API endpoint to suggest a fresh, unused short room code
+app.get('/api/newcode', (req, res) => {
+  res.json({ code: generateRoomCode() });
 });
 
 // API endpoint to create a new room

@@ -599,7 +599,7 @@
     function endTone(startTime){
       const ctx = state.audioCtx; if (!ctx) return;
       const base = (startTime != null) ? Math.max(startTime, ctx.currentTime) : ctx.currentTime;
-      const dur = 0.825;
+      const dur = 1.0;
 
       // Shared envelope: fast attack, flat hold, quick (but not clicky) release.
       const env = ctx.createGain();

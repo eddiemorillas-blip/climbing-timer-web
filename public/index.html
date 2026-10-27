@@ -591,29 +591,43 @@
       osc.start(t); osc.stop(t + seconds + 0.05);
     }
 
-    // End-of-climb signal: a bright, confident stacked chord (perfect fifth + a
-    // touch of octave sparkle) with a soft attack and smooth exponential decay.
-    // Replaces the old 100 Hz sawtooth + noise burst, which sounded "farty".
+    // End-of-climb signal: a classic sports-timer buzzer — a flat, harsh,
+    // low-pitched blast that unmistakably says "time's up". Built from a pair
+    // of slightly detuned low sawtooths (the detuning creates a rough, buzzy
+    // beating) plus a square-wave layer for bite, with a near-instant attack
+    // and a flat sustain that cuts off hard. Replaces the old bell chord.
     function endTone(startTime){
       const ctx = state.audioCtx; if (!ctx) return;
       const base = (startTime != null) ? Math.max(startTime, ctx.currentTime) : ctx.currentTime;
-      const dur = 1.3;
-      const partials = [
-        { freq: 784.00, type: 'triangle', gain: 0.85 }, // G5
-        { freq: 523.25, type: 'sine',     gain: 0.65 }, // C5
-        { freq: 1046.5, type: 'sine',     gain: 0.22 }  // C6 sparkle
+      const dur = 1.1;
+
+      // Shared envelope: fast attack, flat hold, quick (but not clicky) release.
+      const env = ctx.createGain();
+      env.gain.setValueAtTime(0.0001, base);
+      env.gain.linearRampToValueAtTime(0.9, base + 0.006); // 6ms snap-on
+      env.gain.setValueAtTime(0.9, base + dur - 0.05);
+      env.gain.linearRampToValueAtTime(0.0001, base + dur); // hard-ish cutoff
+
+      // Gentle low-pass tames the harshest fizz so it reads as a horn, not noise.
+      const lp = ctx.createBiquadFilter();
+      lp.type = 'lowpass';
+      lp.frequency.value = 2200;
+      lp.connect(env);
+      env.connect(state.masterGain);
+
+      const voices = [
+        { freq: 196, type: 'sawtooth', gain: 0.55 }, // G3 — body
+        { freq: 198, type: 'sawtooth', gain: 0.55 }, // detuned twin → rough beating
+        { freq: 196, type: 'square',   gain: 0.30 }  // square adds the "blare" bite
       ];
-      partials.forEach(p => {
-        const env = ctx.createGain();
-        env.gain.setValueAtTime(0.0001, base);
-        env.gain.linearRampToValueAtTime(p.gain, base + 0.015); // soft 15ms attack, no hard onset
-        env.gain.setValueAtTime(p.gain, base + 0.20);
-        env.gain.exponentialRampToValueAtTime(0.0008, base + dur);
-        env.connect(state.masterGain);
+      voices.forEach(v => {
+        const g = ctx.createGain();
+        g.gain.value = v.gain;
+        g.connect(lp);
         const osc = ctx.createOscillator();
-        osc.type = p.type;
-        osc.frequency.value = p.freq;
-        osc.connect(env);
+        osc.type = v.type;
+        osc.frequency.value = v.freq;
+        osc.connect(g);
         osc.start(base);
         osc.stop(base + dur + 0.05);
       });

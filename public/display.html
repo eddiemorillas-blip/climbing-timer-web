@@ -260,12 +260,17 @@
     const state = {
       phase: 'stopped',
       remaining: 240,
-      deadline: null,
+      running: false,
+      climbMin: 4, climbSec: 0, transMin: 1, transSec: 0,
+      cycleAnchor: null,
       clockOffset: 0,
       clockSynced: false,
       showNames: true,
       categories: []
     };
+
+    const totalClimb = () => (state.climbMin * 60 + state.climbSec);
+    const totalTrans = () => (state.transMin * 60 + state.transSec);
 
     // --- Clock synchronization (NTP-style) — matches the operator page. ---
     function serverNow() { return Date.now() + state.clockOffset; }
@@ -297,12 +302,19 @@
     }
     setInterval(() => { if (isConnected) syncClock(); }, 30000);
 
-    // Seconds remaining derived locally from the server deadline.
-    function computeRemaining() {
-      if (state.deadline) {
-        return Math.max(0, (state.deadline - serverNow()) / 1000);
+    // Derive {phase, remaining(seconds)} locally from the repeating cycle, so
+    // the clock and phase stay correct through a multi-phase wifi outage.
+    function computeCycle() {
+      const climbMs = totalClimb() * 1000;
+      const P = climbMs + totalTrans() * 1000;
+      const now = serverNow();
+      if (!state.running || !state.cycleAnchor || climbMs <= 0 || P <= 0) {
+        return { phase: state.phase, remaining: state.remaining };
       }
-      return state.remaining;
+      let pos = (now - state.cycleAnchor) % P;
+      if (pos < 0) pos += P;
+      if (pos < climbMs) return { phase: 'climb', remaining: (climbMs - pos) / 1000 };
+      return { phase: 'transition', remaining: (P - pos) / 1000 };
     }
 
     const fmt = (s) => {
@@ -311,19 +323,24 @@
       return String(m).padStart(2, '0') + ':' + String(r).padStart(2, '0');
     };
 
-    function updateDisplay() {
-      document.getElementById('timeDisplay').textContent = fmt(Math.ceil(computeRemaining() - 1e-6));
+    function applyPhaseLabel(phase) {
       const phaseLabel = document.getElementById('phaseLabel');
-      if (state.phase === 'stopped') {
+      if (phase === 'stopped') {
         phaseLabel.textContent = 'Ready';
         phaseLabel.className = 'phase-stopped';
-      } else if (state.phase === 'climb') {
+      } else if (phase === 'climb') {
         phaseLabel.textContent = 'CLIMB';
         phaseLabel.className = 'phase-climb';
       } else {
         phaseLabel.textContent = 'TRANSITION';
         phaseLabel.className = 'phase-transition';
       }
+    }
+
+    function updateDisplay() {
+      const c = computeCycle();
+      document.getElementById('timeDisplay').textContent = fmt(Math.ceil(c.remaining - 1e-6));
+      applyPhaseLabel(c.phase);
     }
 
     // --- Completion Tracking Helpers ---
@@ -344,7 +361,12 @@
       }
       state.phase = serverState.phase;
       state.remaining = serverState.remaining;
-      state.deadline = (typeof serverState.deadline === 'number') ? serverState.deadline : null;
+      state.running = !!serverState.running;
+      if (typeof serverState.climbMin === 'number') state.climbMin = serverState.climbMin;
+      if (typeof serverState.climbSec === 'number') state.climbSec = serverState.climbSec;
+      if (typeof serverState.transMin === 'number') state.transMin = serverState.transMin;
+      if (typeof serverState.transSec === 'number') state.transSec = serverState.transSec;
+      state.cycleAnchor = (typeof serverState.cycleAnchor === 'number') ? serverState.cycleAnchor : null;
       if (typeof serverState.showNames === 'boolean') {
         state.showNames = serverState.showNames;
         renderClimberGrid();
@@ -353,6 +375,10 @@
     });
 
     socket.on('config-sync', (config) => {
+      if (typeof config.climbMin === 'number') state.climbMin = config.climbMin;
+      if (typeof config.climbSec === 'number') state.climbSec = config.climbSec;
+      if (typeof config.transMin === 'number') state.transMin = config.transMin;
+      if (typeof config.transSec === 'number') state.transSec = config.transSec;
       if (typeof config.showNames === 'boolean') {
         state.showNames = config.showNames;
         renderClimberGrid();
@@ -434,10 +460,13 @@
       grid.innerHTML = html;
     }
 
-    // Smooth local render loop — keeps the clock moving every frame, so a wifi
-    // drop no longer freezes the displayed time.
+    // Smooth local render loop — keeps the clock AND phase moving every frame
+    // from the local cycle, so a wifi drop no longer freezes the time or stalls
+    // a phase change across the outage.
     function renderLoop() {
-      document.getElementById('timeDisplay').textContent = fmt(Math.ceil(computeRemaining() - 1e-6));
+      const c = computeCycle();
+      document.getElementById('timeDisplay').textContent = fmt(Math.ceil(c.remaining - 1e-6));
+      applyPhaseLabel(c.phase);
       requestAnimationFrame(renderLoop);
     }
     requestAnimationFrame(renderLoop);

@@ -47,10 +47,12 @@ function createRoomState() {
       phase: 'stopped',
       running: false,
       remaining: 240,
-      // Absolute server-clock timestamp (ms) at which the current countdown
-      // reaches 0. Clients derive their own `remaining` from this so they stay
-      // accurate between (and through dropped) network packets. Null when paused/stopped.
-      deadline: null,
+      // Server-clock timestamp (ms) marking the start of a CLIMB phase that the
+      // repeating climb/transition cycle is anchored to. Clients free-run the
+      // whole cycle locally from this anchor + the climb/trans durations, so they
+      // stay accurate through a wifi outage spanning any number of phases. Null
+      // when paused/stopped.
+      cycleAnchor: null,
       showNames: true,
       rounds: [],
       activeRoundIndex: 0,
@@ -546,7 +548,8 @@ function advanceNonHeldClimbers(timerState) {
 }
 
 // Build the payload broadcast on 'timer-sync'. Includes `serverTime` so clients
-// can measure their clock offset, and `deadline` so they can count down locally.
+// can measure their clock offset, and `cycleAnchor` + the climb/trans durations
+// so they can free-run the whole repeating cycle locally.
 function syncPayload(ts) {
   return Object.assign({}, ts, { serverTime: Date.now() });
 }
@@ -557,17 +560,47 @@ function broadcastSync(roomId) {
   io.to(roomId).emit('timer-sync', syncPayload(room.timerState));
 }
 
-// Compute the authoritative whole-second remaining from the deadline.
-function remainingFromDeadline(ts) {
-  if (!ts.deadline) return ts.remaining;
-  return Math.max(0, Math.ceil((ts.deadline - Date.now()) / 1000));
+// --- Cycle math ---
+// The running timer is a repeating cycle: climb (climbMs) -> transition (transMs)
+// -> climb -> ... anchored at `cycleAnchor` (the start of a climb phase). Any
+// moment's phase and remaining time is pure arithmetic from the anchor, so a
+// client needs no per-phase packet to stay correct across outages.
+const climbMsOf = (ts) => totalClimb(ts) * 1000;
+const transMsOf = (ts) => totalTrans(ts) * 1000;
+const periodMsOf = (ts) => climbMsOf(ts) + transMsOf(ts);
+
+// Derive {phase, remaining(seconds)} at time `atMs` from the cycle anchor.
+function phaseAt(ts, atMs) {
+  const climbMs = climbMsOf(ts);
+  const P = periodMsOf(ts);
+  if (!ts.running || !ts.cycleAnchor || climbMs <= 0 || P <= 0) {
+    return { phase: ts.phase, remaining: ts.remaining };
+  }
+  let pos = (atMs - ts.cycleAnchor) % P;
+  if (pos < 0) pos += P;
+  if (pos < climbMs) {
+    return { phase: 'climb', remaining: Math.max(0, Math.ceil((climbMs - pos) / 1000)) };
+  }
+  return { phase: 'transition', remaining: Math.max(0, Math.ceil((P - pos) / 1000)) };
 }
 
-// Schedule the precise phase transition for a room. The countdown reaches 0 at
-// `deadline`; we hold "00:00" visible for 1 second, then advance. Using a
-// dedicated timeout (rather than polling a 1s interval) keeps transitions
-// accurate to a few ms regardless of interval jitter.
-function scheduleRoomTransition(roomId) {
+// Compute the cycle anchor that reproduces the given phase/remaining at `atMs`.
+// Used when (re)starting a running timer (fresh start, resume, manual phase jump).
+function anchorFromState(ts, atMs) {
+  const climbMs = climbMsOf(ts);
+  const P = periodMsOf(ts);
+  const remMs = ts.remaining * 1000;
+  if (ts.phase === 'transition') {
+    return atMs - (P - remMs);
+  }
+  // climb (or anything else treated as climb)
+  return atMs - (climbMs - remMs);
+}
+
+// Schedule the next phase boundary purely to run server-side side-effects
+// (climber auto-advancement, categories broadcast) and keep the stored
+// phase/remaining fresh for snapshots. Clients don't depend on this firing.
+function scheduleRoomBoundary(roomId) {
   const room = rooms.get(roomId);
   if (!room) return;
   if (room.phaseTimeout) {
@@ -575,59 +608,58 @@ function scheduleRoomTransition(roomId) {
     room.phaseTimeout = null;
   }
   const ts = room.timerState;
-  if (!ts.running || !ts.deadline) return;
-  const fireIn = (ts.deadline + 1000) - Date.now();
+  const climbMs = climbMsOf(ts);
+  const P = periodMsOf(ts);
+  if (!ts.running || !ts.cycleAnchor || climbMs <= 0 || P <= 0) return;
+  let pos = (Date.now() - ts.cycleAnchor) % P;
+  if (pos < 0) pos += P;
+  const msToBoundary = (pos < climbMs) ? (climbMs - pos) : (P - pos);
   room.phaseTimeout = setTimeout(() => {
     room.phaseTimeout = null;
     advancePhaseForRoom(roomId);
-  }, Math.max(0, fireIn));
+  }, Math.max(0, msToBoundary));
 }
 
-// Advance the phase authoritatively and arm the next transition.
+// Runs at each phase boundary. The cycle anchor never moves — the cycle just
+// rolls over — so this only performs side-effects and refreshes stored state.
 function advancePhaseForRoom(roomId) {
   const room = rooms.get(roomId);
   if (!room) return;
   const ts = room.timerState;
   if (!ts.running) return;
 
-  if (ts.phase === 'climb') {
-    // Auto-advance climbers before transitioning away from climb phase
+  const endingPhase = ts.phase;
+  // A climb phase just ended -> auto-advance climbers (whether the next phase is
+  // a transition or, when transitions are 0s, the next climb).
+  if (endingPhase === 'climb') {
     advanceNonHeldClimbers(ts);
     io.to(roomId).emit('categories-sync', ts.categories);
     saveRoomData(roomId, room);
-
-    if (totalTrans(ts) > 0) {
-      ts.phase = 'transition';
-      ts.remaining = totalTrans(ts);
-    } else {
-      ts.phase = 'climb';
-      ts.remaining = totalClimb(ts);
-    }
-  } else if (ts.phase === 'transition') {
-    ts.phase = 'climb';
-    ts.remaining = totalClimb(ts);
   }
 
-  ts.deadline = Date.now() + ts.remaining * 1000;
+  // Refresh stored phase/remaining from the cycle (for snapshots/late joiners).
+  const snap = phaseAt(ts, Date.now());
+  ts.phase = snap.phase;
+  ts.remaining = snap.remaining;
   room.lastActivity = Date.now();
+
   console.log(`[${new Date().toISOString()}] [Room: ${roomId}] Phase advanced to: ${ts.phase}`);
   broadcastSync(roomId);
-  scheduleRoomTransition(roomId);
+  scheduleRoomBoundary(roomId);
 }
 
-// Server-side countdown driver for a specific room. The deadline (not a
-// per-second decrement) is authoritative; the interval below is only a
-// low-stakes reconciliation heartbeat that keeps `remaining` fresh for
-// snapshots/late joiners and lets clients correct any drift.
+// Server-side driver for a room. The cycle anchor is authoritative; the interval
+// below is a low-stakes reconciliation heartbeat that keeps `remaining` fresh
+// and lets connected clients correct any drift.
 function startServerTimerForRoom(roomId) {
   const room = rooms.get(roomId);
   if (!room) return;
 
   const ts = room.timerState;
-  if (!ts.deadline) {
-    ts.deadline = Date.now() + ts.remaining * 1000;
+  if (!ts.cycleAnchor) {
+    ts.cycleAnchor = anchorFromState(ts, Date.now());
   }
-  scheduleRoomTransition(roomId);
+  scheduleRoomBoundary(roomId);
 
   if (room.timerInterval) return; // heartbeat already running
 
@@ -639,7 +671,9 @@ function startServerTimerForRoom(roomId) {
       stopServerTimerForRoom(roomId);
       return;
     }
-    timerState.remaining = remainingFromDeadline(timerState);
+    const snap = phaseAt(timerState, Date.now());
+    timerState.phase = snap.phase;
+    timerState.remaining = snap.remaining;
     currentRoom.lastActivity = Date.now();
     broadcastSync(roomId);
   }, 1000);
@@ -684,7 +718,7 @@ io.on('connection', (socket) => {
 
   // Clock-offset handshake: client sends its local send-time, we echo it back
   // alongside our clock so the client can estimate RTT and the offset between
-  // its clock and ours. This makes the absolute `deadline` meaningful cross-device.
+  // its clock and ours. This makes the cycle anchor meaningful cross-device.
   socket.on('time-ping', (t0) => {
     socket.emit('time-pong', { t0, serverTime: Date.now() });
   });
@@ -720,28 +754,32 @@ io.on('connection', (socket) => {
       // Validate incoming state
       if (typeof newState === 'object' && newState !== null) {
         const wasRunning = ts.running;
-        const prevDeadline = ts.deadline;
+        const prevAnchor = ts.cycleAnchor;
+        const now = Date.now();
 
-        // The deadline/serverTime are server-authoritative — never trust values
+        // cycleAnchor/serverTime are server-authoritative — never trust values
         // echoed back by a client (they would clobber our timing reference).
-        delete newState.deadline;
+        delete newState.cycleAnchor;
+        delete newState.deadline; // legacy field, ignore if an old client sends it
         delete newState.serverTime;
 
         // Update the server's state
         Object.assign(ts, newState);
-        currentRoom.lastActivity = Date.now();
+        currentRoom.lastActivity = now;
 
-        // Recompute the authoritative deadline from the (now current) remaining.
         if (ts.running) {
-          // On pause->resume etc. remaining is already correct; anchor a fresh deadline.
-          ts.deadline = Date.now() + ts.remaining * 1000;
+          // Fresh start / resume / manual phase jump: anchor the cycle so it
+          // reproduces the current phase + remaining right now.
+          ts.cycleAnchor = anchorFromState(ts, now);
         } else {
-          // Pausing: freeze the authoritative remaining from the old deadline
-          // so a stale client value can't jump the clock.
-          if (wasRunning && prevDeadline) {
-            ts.remaining = Math.max(0, Math.ceil((prevDeadline - Date.now()) / 1000));
+          // Pausing: freeze the authoritative remaining from the old cycle so a
+          // stale client value can't jump the clock, then drop the anchor.
+          if (wasRunning && prevAnchor) {
+            const snap = phaseAt(Object.assign({}, ts, { cycleAnchor: prevAnchor, running: true }), now);
+            ts.phase = snap.phase;
+            ts.remaining = snap.remaining;
           }
-          ts.deadline = null;
+          ts.cycleAnchor = null;
         }
 
         // Start or stop the server timer based on running state
@@ -752,9 +790,9 @@ io.on('connection', (socket) => {
           stopServerTimerForRoom(socket.roomId);
           console.log(`[${new Date().toISOString()}] [Room: ${socket.roomId}] Timer stopped by ${clientId}`);
         } else if (ts.running) {
-          // Still running but remaining/phase changed (e.g. manual next-phase or
-          // config edit mid-run) — re-arm the transition for the new deadline.
-          scheduleRoomTransition(socket.roomId);
+          // Still running but remaining/phase/durations changed (manual next-phase
+          // or config edit mid-run) — re-arm the boundary for the new cycle.
+          scheduleRoomBoundary(socket.roomId);
         }
 
         // Broadcast the new state to ALL clients in the room
@@ -793,6 +831,14 @@ io.on('connection', (socket) => {
           transSec: ts.transSec,
           showNames: ts.showNames
         });
+
+        // If durations changed mid-run, the cycle period changed: re-arm the
+        // side-effect boundary and push a fresh cycle snapshot so every device
+        // recomputes consistently.
+        if (ts.running) {
+          scheduleRoomBoundary(socket.roomId);
+          broadcastSync(socket.roomId);
+        }
 
         console.log(`[${new Date().toISOString()}] [Room: ${socket.roomId}] Config updated by ${clientId}: climb=${config.climbMin}:${config.climbSec}, showNames=${ts.showNames}`);
       }

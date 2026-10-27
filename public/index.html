@@ -314,7 +314,7 @@
         type: 'operator'
       },
       // Aggressive reconnection so a brief wifi drop recovers fast. The timer
-      // keeps counting locally in the meantime (deadline-based), so a drop is invisible.
+      // keeps counting locally in the meantime (cycle-based), so a drop is invisible.
       reconnection: true,
       reconnectionDelay: 400,
       reconnectionDelayMax: 2000,
@@ -420,7 +420,7 @@
       phase: 'stopped',
       running: false,
       remaining: 240,
-      deadline: null,       // server-clock ms when current countdown hits 0
+      cycleAnchor: null,    // server-clock ms marking a climb-phase start; see computeCycle()
       clockOffset: 0,       // serverClock - localClock (ms); see syncClock()
       clockSynced: false,   // true once a ping-based offset has been measured
       showNames: true,
@@ -568,41 +568,58 @@
     }
 
     // --- Look-ahead audio scheduler ---
-    // Beeps are queued against the sample-accurate AudioContext clock from the
-    // phase deadline, NOT triggered on packet arrival. This gives rock-steady
-    // cadence immune to network jitter and dropped packets.
-    const audioSched = { intervalId: null, scheduled: new Set(), key: null };
+    // Beeps are queued against the sample-accurate AudioContext clock, computed
+    // from the repeating cycle (anchor + durations), NOT triggered on packet
+    // arrival. This gives rock-steady cadence immune to network jitter and keeps
+    // firing correctly through a multi-phase wifi outage. A monotonically
+    // advancing `scheduledUntil` watermark (in server-clock ms) ensures each
+    // event is queued exactly once as its time enters the look-ahead window.
+    const audioSched = { intervalId: null, scheduledUntil: 0 };
 
     function clockToAudioTime(serverMs){
       const ctx = state.audioCtx;
       return ctx.currentTime + (serverMs - serverNow()) / 1000;
     }
 
+    // All audio events (per climb phase) whose time lands in (fromMs, toMs].
+    function audioEventsInWindow(fromMs, toMs){
+      const out = [];
+      const climbMs = totalClimb() * 1000;
+      const P = climbMs + totalTrans() * 1000;
+      if (!state.cycleAnchor || climbMs <= 0 || P <= 0) return out;
+      const nStart = Math.floor((fromMs - state.cycleAnchor) / P) - 1;
+      const nEnd   = Math.floor((toMs   - state.cycleAnchor) / P) + 1;
+      for (let n = Math.max(0, nStart); n <= nEnd; n++){
+        const Ts = state.cycleAnchor + n * P; // climb start
+        const Te = Ts + climbMs;              // climb end
+        const cand = [
+          { at: Ts,          fn: t => climbStartTone(t) },
+          { at: Te - 60000,  fn: t => beep(800, 0.65, 'sine', t) }
+        ];
+        for (let s = 5; s >= 1; s--) cand.push({ at: Te - s * 1000, fn: t => beep(1200, 0.45, 'square', t) });
+        cand.push({ at: Te, fn: t => endTone(t) });
+        for (const c of cand) if (c.at > fromMs && c.at <= toMs) out.push(c);
+      }
+      return out;
+    }
+
     function audioSchedulerTick(){
       const ctx = state.audioCtx;
       if (!ctx || ctx.state !== 'running') return;
-      if (!state.running || state.phase !== 'climb' || !state.deadline) return;
-
-      // Reset the scheduled set whenever we enter a new climb phase instance.
-      const key = 'climb:' + state.deadline;
-      if (audioSched.key !== key) { audioSched.key = key; audioSched.scheduled.clear(); }
+      if (!state.running || !state.cycleAnchor || totalClimb() <= 0) return;
 
       const now = serverNow();
-      const LOOKAHEAD = 300; // ms: schedule events landing within this window
-      const events = [{ id: 'w60', at: state.deadline - 60000, fn: t => beep(800, 0.65, 'sine', t) }];
-      for (let s = 5; s >= 1; s--) {
-        events.push({ id: 'c' + s, at: state.deadline - s * 1000, fn: t => beep(1200, 0.45, 'square', t) });
+      const windowEnd = now + 300; // ms look-ahead
+      // (Re)initialize the watermark on start/resume or after a gap (backgrounded
+      // tab, long stall) so we don't replay stale events; -50ms so an event at
+      // exactly `now` (e.g. the first climb-start tone) still fires.
+      if (!audioSched.scheduledUntil || audioSched.scheduledUntil < now - 1000) {
+        audioSched.scheduledUntil = now - 50;
       }
-      events.push({ id: 'end', at: state.deadline, fn: t => endTone(t) });
-
-      for (const ev of events) {
-        if (audioSched.scheduled.has(ev.id)) continue;
-        const dt = ev.at - now;
-        if (dt > LOOKAHEAD) continue;       // not yet — re-checked next tick
-        audioSched.scheduled.add(ev.id);
-        if (dt < -250) continue;            // already past (joined mid-phase) — skip silently
+      for (const ev of audioEventsInWindow(audioSched.scheduledUntil, windowEnd)) {
         ev.fn(clockToAudioTime(ev.at));
       }
+      audioSched.scheduledUntil = windowEnd;
     }
 
     const clamp = (n, min, max) => Math.max(min, Math.min(max, Math.trunc(Number(n)||0)));
@@ -630,25 +647,40 @@
       return category.climberProgress?.[climberName] || [];
     }
 
-    // Seconds remaining right now, derived locally from the server deadline so
-    // the clock keeps running accurately between (and through dropped) packets.
-    function computeRemaining(){
-      if (state.running && state.deadline) {
-        return Math.max(0, (state.deadline - serverNow()) / 1000);
+    // Derive {phase, remaining(seconds)} right now from the repeating cycle
+    // (anchor + durations). Because it's pure local arithmetic, the clock stays
+    // correct through a wifi outage spanning any number of phase boundaries.
+    function computeCycle(){
+      const climbMs = totalClimb() * 1000;
+      const P = climbMs + totalTrans() * 1000;
+      const now = serverNow();
+      if (!state.running || !state.cycleAnchor || climbMs <= 0 || P <= 0) {
+        return { phase: state.phase, remaining: state.remaining };
       }
-      return state.remaining;
+      let pos = (now - state.cycleAnchor) % P;
+      if (pos < 0) pos += P;
+      if (pos < climbMs) return { phase: 'climb', remaining: (climbMs - pos) / 1000 };
+      return { phase: 'transition', remaining: (P - pos) / 1000 };
+    }
+
+    function phaseText(phase){
+      return phase === 'stopped' ? 'Ready' : (phase === 'climb' ? 'Climb' : 'Transition');
     }
 
     function updateDisplay(){
-      document.getElementById('timeDisplay').textContent = fmt(Math.ceil(computeRemaining() - 1e-6));
-      document.getElementById('phaseLabel').textContent = state.phase === 'stopped' ? 'Ready' : (state.phase === 'climb' ? 'Climb' : 'Transition');
+      const c = computeCycle();
+      document.getElementById('timeDisplay').textContent = fmt(Math.ceil(c.remaining - 1e-6));
+      document.getElementById('phaseLabel').textContent = phaseText(c.phase);
       document.getElementById('startPause').textContent = state.running ? 'Pause' : (state.phase === 'stopped' ? 'Start' : 'Resume');
     }
 
-    // Smooth local render loop — drives the visible clock every frame rather
-    // than only on packet arrival (which caused lag/freezes on wifi hiccups).
+    // Smooth local render loop — drives the visible clock and phase label every
+    // frame from the local cycle, rather than only on packet arrival (which
+    // caused lag/freezes on wifi hiccups and stalled phase changes across drops).
     function renderLoop(){
-      document.getElementById('timeDisplay').textContent = fmt(Math.ceil(computeRemaining() - 1e-6));
+      const c = computeCycle();
+      document.getElementById('timeDisplay').textContent = fmt(Math.ceil(c.remaining - 1e-6));
+      document.getElementById('phaseLabel').textContent = phaseText(c.phase);
       requestAnimationFrame(renderLoop);
     }
     requestAnimationFrame(renderLoop);
@@ -726,13 +758,19 @@
     socket.on('timer-sync', (serverState) => {
       state.syncInProgress = true;  // Prevent re-emitting during sync
 
-      const oldPhase = state.phase;
-
       // Seed a coarse clock offset from the first packet (one-way, ignores
       // latency) so the display is roughly right before ping-sync completes.
       if (!state.clockSynced && typeof serverState.serverTime === 'number') {
         state.clockOffset = serverState.serverTime - Date.now();
       }
+
+      // If the cycle definition changed (anchor or durations), reset the audio
+      // watermark so the scheduler re-aligns to the new cycle without replaying
+      // or skipping beeps.
+      const newAnchor = (typeof serverState.cycleAnchor === 'number') ? serverState.cycleAnchor : null;
+      const cycleChanged = newAnchor !== state.cycleAnchor
+        || serverState.climbMin !== state.climbMin || serverState.climbSec !== state.climbSec
+        || serverState.transMin !== state.transMin || serverState.transSec !== state.transSec;
 
       // Update local state from server
       state.climbMin = serverState.climbMin;
@@ -742,15 +780,12 @@
       state.phase = serverState.phase;
       state.running = serverState.running;
       state.remaining = serverState.remaining;
-      state.deadline = (typeof serverState.deadline === 'number') ? serverState.deadline : null;
+      state.cycleAnchor = newAnchor;
 
-      // Play the start tone on a genuine entry into the climb phase — but never
-      // on the first sync after a (re)connect, which would be a spurious replay.
-      // Countdown beeps/end tone are handled by the look-ahead scheduler.
-      if (!freshConnection && oldPhase !== serverState.phase && serverState.phase === 'climb') {
-        climbStartTone();
-        console.log('Phase changed to climb - playing start tone');
-      }
+      if (cycleChanged) audioSched.scheduledUntil = 0;
+      // All tones (climb-start, 60s warning, final countdown, end tone) are now
+      // driven locally by the look-ahead scheduler off the cycle — nothing is
+      // played on packet arrival, so reconnects never replay a spurious tone.
       freshConnection = false;
 
       // Update input fields
